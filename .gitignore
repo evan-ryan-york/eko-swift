@@ -1,0 +1,68 @@
+# Xcode
+*.xcuserstate
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+Package.resolved
+
+# Supabase
+supabase/.env
+supabase/.branches/
+supabase/.temp/
+
+# Secrets & Configuration
+Config.swift
+**/Config.swift
+.env
+.env.*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Thumbnails
+._*
+
+# Files that might appear in the root of a volume
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Directories potentially created on remote AFP share
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# CocoaPods (if used in future)
+Pods/
+*.xcworkspace
+
+# Carthage (if used in future)
+Carthage/Build/
+
+# fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# Code Injection
+iOSInjectionProject/

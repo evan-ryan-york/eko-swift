@@ -6,13 +6,36 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		1DADC9512E99D1AB00EBD1FC /* EkoCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1DADC9502E99D1AB00EBD1FC /* EkoCore */; };
+		1DADC9542E99D1BA00EBD1FC /* EkoKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1DADC9532E99D1BA00EBD1FC /* EkoKit */; };
+		1DB808052E9A78910019B896 /* Auth in Frameworks */ = {isa = PBXBuildFile; productRef = 1DB808042E9A78910019B896 /* Auth */; };
+		1DB808072E9A78910019B896 /* Functions in Frameworks */ = {isa = PBXBuildFile; productRef = 1DB808062E9A78910019B896 /* Functions */; };
+		1DB808092E9A78910019B896 /* PostgREST in Frameworks */ = {isa = PBXBuildFile; productRef = 1DB808082E9A78910019B896 /* PostgREST */; };
+		1DB8080B2E9A78910019B896 /* Realtime in Frameworks */ = {isa = PBXBuildFile; productRef = 1DB8080A2E9A78910019B896 /* Realtime */; };
+		1DB8080D2E9A78910019B896 /* Storage in Frameworks */ = {isa = PBXBuildFile; productRef = 1DB8080C2E9A78910019B896 /* Storage */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		1DADC91D2E99B51E00EBD1FC /* Eko.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Eko.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		1DB8080F2E9A7D040019B896 /* Exceptions for "Eko" folder in "Eko" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 1DADC91C2E99B51E00EBD1FC /* Eko */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		1DADC91F2E99B51E00EBD1FC /* Eko */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				1DB8080F2E9A7D040019B896 /* Exceptions for "Eko" folder in "Eko" target */,
+			);
 			path = Eko;
 			sourceTree = "<group>";
 		};
@@ -23,6 +46,13 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1DADC9512E99D1AB00EBD1FC /* EkoCore in Frameworks */,
+				1DADC9542E99D1BA00EBD1FC /* EkoKit in Frameworks */,
+				1DB8080D2E9A78910019B896 /* Storage in Frameworks */,
+				1DB808072E9A78910019B896 /* Functions in Frameworks */,
+				1DB8080B2E9A78910019B896 /* Realtime in Frameworks */,
+				1DB808052E9A78910019B896 /* Auth in Frameworks */,
+				1DB808092E9A78910019B896 /* PostgREST in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +95,13 @@
 			);
 			name = Eko;
 			packageProductDependencies = (
+				1DADC9502E99D1AB00EBD1FC /* EkoCore */,
+				1DADC9532E99D1BA00EBD1FC /* EkoKit */,
+				1DB808042E9A78910019B896 /* Auth */,
+				1DB808062E9A78910019B896 /* Functions */,
+				1DB808082E9A78910019B896 /* PostgREST */,
+				1DB8080A2E9A78910019B896 /* Realtime */,
+				1DB8080C2E9A78910019B896 /* Storage */,
 			);
 			productName = Eko;
 			productReference = 1DADC91D2E99B51E00EBD1FC /* Eko.app */;
@@ -94,6 +131,11 @@
 			);
 			mainGroup = 1DADC9142E99B51E00EBD1FC;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				1DADC94F2E99D1AB00EBD1FC /* XCLocalSwiftPackageReference "EkoCore" */,
+				1DADC9522E99D1BA00EBD1FC /* XCLocalSwiftPackageReference "EkoKit" */,
+				1DB808032E9A78910019B896 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1DADC91E2E99B51E00EBD1FC /* Products */;
 			projectDirPath = "";
@@ -253,11 +295,13 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Eko/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -270,7 +314,7 @@
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -284,11 +328,13 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Eko/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -301,7 +347,7 @@
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
@@ -328,6 +374,64 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		1DADC94F2E99D1AB00EBD1FC /* XCLocalSwiftPackageReference "EkoCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = EkoCore;
+		};
+		1DADC9522E99D1BA00EBD1FC /* XCLocalSwiftPackageReference "EkoKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = EkoKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		1DB808032E9A78910019B896 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1DADC9502E99D1AB00EBD1FC /* EkoCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = EkoCore;
+		};
+		1DADC9532E99D1BA00EBD1FC /* EkoKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = EkoKit;
+		};
+		1DB808042E9A78910019B896 /* Auth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1DB808032E9A78910019B896 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Auth;
+		};
+		1DB808062E9A78910019B896 /* Functions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1DB808032E9A78910019B896 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Functions;
+		};
+		1DB808082E9A78910019B896 /* PostgREST */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1DB808032E9A78910019B896 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = PostgREST;
+		};
+		1DB8080A2E9A78910019B896 /* Realtime */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1DB808032E9A78910019B896 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Realtime;
+		};
+		1DB8080C2E9A78910019B896 /* Storage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1DB808032E9A78910019B896 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Storage;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 1DADC9152E99B51E00EBD1FC /* Project object */;
 }
