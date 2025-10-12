@@ -17,6 +17,7 @@ public extension Color {
     static let ekoBackground = Color(UIColor.systemBackground)
     static let ekoSecondaryBackground = Color(UIColor.secondarySystemBackground)
     static let ekoTertiaryBackground = Color(UIColor.tertiarySystemBackground)
+    static let ekoSurface = Color(UIColor.tertiarySystemBackground)
 
     static let ekoLabel = Color(UIColor.label)
     static let ekoSecondaryLabel = Color(UIColor.secondaryLabel)

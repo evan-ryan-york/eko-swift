@@ -7,6 +7,9 @@ public struct Child: Codable, Identifiable, Sendable {
     public var name: String
     public var age: Int
     public var temperament: Temperament
+    public var temperamentTalkative: Int
+    public var temperamentSensitivity: Int
+    public var temperamentAccountability: Int
     public let createdAt: Date
     public var updatedAt: Date
 
@@ -16,6 +19,9 @@ public struct Child: Codable, Identifiable, Sendable {
         name: String,
         age: Int,
         temperament: Temperament,
+        temperamentTalkative: Int = 5,
+        temperamentSensitivity: Int = 5,
+        temperamentAccountability: Int = 5,
         createdAt: Date,
         updatedAt: Date
     ) {
@@ -24,6 +30,9 @@ public struct Child: Codable, Identifiable, Sendable {
         self.name = name
         self.age = age
         self.temperament = temperament
+        self.temperamentTalkative = temperamentTalkative
+        self.temperamentSensitivity = temperamentSensitivity
+        self.temperamentAccountability = temperamentAccountability
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -34,8 +43,29 @@ public struct Child: Codable, Identifiable, Sendable {
         case name
         case age
         case temperament
+        case temperamentTalkative = "temperament_talkative"
+        case temperamentSensitivity = "temperament_sensitivity"
+        case temperamentAccountability = "temperament_accountability"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+    }
+
+    // MARK: - Lyra Context
+    public func lyraContext(
+        recentThemes: [String] = [],
+        effectiveStrategies: [String] = []
+    ) -> LyraChildContext {
+        LyraChildContext(
+            id: id,
+            name: name,
+            age: age,
+            temperament: temperament,
+            talkative: temperamentTalkative,
+            sensitivity: temperamentSensitivity,
+            accountability: temperamentAccountability,
+            recentThemes: recentThemes,
+            effectiveStrategies: effectiveStrategies
+        )
     }
 }
 

@@ -1,7 +1,17 @@
 import Foundation
 import struct EkoCore.User
 import struct EkoCore.Child
+import struct EkoCore.Conversation
+import struct EkoCore.Message
+import struct EkoCore.CreateConversationDTO
+import struct EkoCore.SendMessageDTO
+import struct EkoCore.CompleteConversationDTO
+import struct EkoCore.CompleteConversationResponse
+import struct EkoCore.CreateRealtimeSessionDTO
+import struct EkoCore.RealtimeSessionResponse
 import Auth
+import PostgREST
+import Functions
 
 // MARK: - UserDefaults Storage Adapter
 private final class UserDefaultsStorage: AuthLocalStorage, @unchecked Sendable {
@@ -24,17 +34,41 @@ final class SupabaseService: @unchecked Sendable {
     static let shared = SupabaseService()
 
     private let authClient: AuthClient
+    private let postgrestClient: PostgrestClient
+    private let functionsClient: FunctionsClient
+    private let baseURL: URL
 
     private init() {
         guard let url = URL(string: Config.Supabase.url) else {
             fatalError("Invalid Supabase URL")
         }
 
-        // Initialize the Auth client directly
+        self.baseURL = url
+
+        // Initialize the Auth client
         self.authClient = AuthClient(
             url: url.appendingPathComponent("auth/v1"),
             headers: ["apikey": Config.Supabase.anonKey],
             localStorage: UserDefaultsStorage()
+        )
+
+        // Initialize PostgREST client for database operations
+        self.postgrestClient = PostgrestClient(
+            url: url.appendingPathComponent("rest/v1"),
+            schema: "public",
+            headers: [
+                "apikey": Config.Supabase.anonKey,
+                "Authorization": "Bearer \(Config.Supabase.anonKey)"
+            ]
+        )
+
+        // Initialize Functions client for Edge Functions
+        self.functionsClient = FunctionsClient(
+            url: url.appendingPathComponent("functions/v1"),
+            headers: [
+                "apikey": Config.Supabase.anonKey,
+                "Authorization": "Bearer \(Config.Supabase.anonKey)"
+            ]
         )
     }
 
@@ -138,24 +172,155 @@ final class SupabaseService: @unchecked Sendable {
         )
     }
 
+    // MARK: - Lyra Conversations
+
+    func createConversation(childId: UUID) async throws -> Conversation {
+        let dto = CreateConversationDTO(childId: childId)
+
+        return try await functionsClient.invoke(
+            "create-conversation",
+            options: FunctionInvokeOptions(body: dto)
+        )
+    }
+
+    func getActiveConversation(childId: UUID) async throws -> Conversation? {
+        let response = try await postgrestClient
+            .from("conversations")
+            .select()
+            .eq("child_id", value: childId.uuidString)
+            .eq("status", value: "active")
+            .order("updated_at", ascending: false)
+            .limit(1)
+            .execute()
+
+        let conversations: [Conversation] = response.value
+        return conversations.first
+    }
+
+    func getMessages(conversationId: UUID) async throws -> [Message] {
+        let response = try await postgrestClient
+            .from("messages")
+            .select()
+            .eq("conversation_id", value: conversationId.uuidString)
+            .order("created_at", ascending: true)
+            .execute()
+
+        let messages: [Message] = response.value
+        return messages
+    }
+
+    func sendMessage(
+        conversationId: UUID,
+        message: String,
+        childId: UUID
+    ) async throws -> AsyncThrowingStream<String, Error> {
+        let dto = SendMessageDTO(
+            conversationId: conversationId,
+            message: message,
+            childId: childId
+        )
+
+        return AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    // Note: For streaming responses, we may need to use a custom HTTP client
+                    // For now, invoke returns the full response
+                    struct StreamResponse: Codable {
+                        let content: String
+                    }
+
+                    let response: StreamResponse = try await functionsClient.invoke(
+                        "send-message",
+                        options: FunctionInvokeOptions(body: dto)
+                    )
+
+                    // For now, yield the complete response
+                    // TODO: Implement true streaming when needed
+                    continuation.yield(response.content)
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+
+    func completeConversation(conversationId: UUID) async throws -> CompleteConversationResponse {
+        let dto = CompleteConversationDTO(conversationId: conversationId)
+
+        return try await functionsClient.invoke(
+            "complete-conversation",
+            options: FunctionInvokeOptions(body: dto)
+        )
+    }
+
+    func createRealtimeSession(
+        sdp: String,
+        conversationId: UUID,
+        childId: UUID
+    ) async throws -> RealtimeSessionResponse {
+        let dto = CreateRealtimeSessionDTO(
+            sdp: sdp,
+            conversationId: conversationId,
+            childId: childId
+        )
+
+        return try await functionsClient.invoke(
+            "create-realtime-session",
+            options: FunctionInvokeOptions(body: dto)
+        )
+    }
+
     // MARK: - Data Operations
 
     func fetchChildren(forUserId userId: UUID) async throws -> [Child] {
-        // TODO: Implement with PostgREST
-        return []
+        let response = try await postgrestClient
+            .from("children")
+            .select()
+            .eq("user_id", value: userId.uuidString)
+            .order("created_at", ascending: false)
+            .execute()
+
+        let children: [Child] = response.value
+        return children
     }
 
     func createChild(_ child: Child) async throws -> Child {
-        // TODO: Implement with PostgREST
-        throw NetworkError.unknown(NSError(domain: "Not implemented", code: -1))
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        encoder.dateEncodingStrategy = .iso8601
+        let childData = try encoder.encode(child)
+
+        return try await postgrestClient
+            .from("children")
+            .insert(childData)
+            .select()
+            .single()
+            .execute()
+            .value
     }
 
     func updateChild(_ child: Child) async throws -> Child {
-        // TODO: Implement with PostgREST
-        throw NetworkError.unknown(NSError(domain: "Not implemented", code: -1))
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        encoder.dateEncodingStrategy = .iso8601
+        let childData = try encoder.encode(child)
+
+        return try await postgrestClient
+            .from("children")
+            .update(childData)
+            .eq("id", value: child.id.uuidString)
+            .select()
+            .single()
+            .execute()
+            .value
     }
 
     func deleteChild(id: UUID) async throws {
-        // TODO: Implement with PostgREST
+        try await postgrestClient
+            .from("children")
+            .delete()
+            .eq("id", value: id.uuidString)
+            .execute()
     }
 }
