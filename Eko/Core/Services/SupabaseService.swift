@@ -416,20 +416,20 @@ final class SupabaseService: @unchecked Sendable {
     }
 
     func createRealtimeSession(
-        sdp: String,
         conversationId: UUID,
         childId: UUID
     ) async throws -> RealtimeSessionResponse {
         let dto = CreateRealtimeSessionDTO(
-            sdp: sdp,
             conversationId: conversationId,
             childId: childId
         )
 
-        return try await functionsClient.invoke(
+        let response: RealtimeSessionResponse = try await functionsClient.invoke(
             "create-realtime-session",
             options: FunctionInvokeOptions(body: dto)
         )
+
+        return response
     }
 
     // MARK: - Data Operations

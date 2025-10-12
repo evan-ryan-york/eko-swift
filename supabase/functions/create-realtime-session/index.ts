@@ -1,5 +1,6 @@
 // Lyra Create Realtime Session Edge Function
 // Sets up OpenAI Realtime API session for voice conversations
+// Updated for GA API (ephemeral keys)
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -11,14 +12,14 @@ const corsHeaders = {
 }
 
 interface CreateRealtimeSessionRequest {
-  sdp: string // SDP offer from iOS WebRTC
   conversationId: string
   childId: string
 }
 
 interface RealtimeSessionResponse {
-  sdp: string // SDP answer from OpenAI
-  callId?: string
+  clientSecret: string
+  model: string
+  voice: string
 }
 
 serve(async (req) => {
@@ -45,11 +46,11 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
     // Parse request body
-    const { sdp, conversationId, childId }: CreateRealtimeSessionRequest = await req.json()
+    const { conversationId, childId }: CreateRealtimeSessionRequest = await req.json()
 
-    if (!sdp || !conversationId || !childId) {
+    if (!conversationId || !childId) {
       return new Response(
-        JSON.stringify({ error: 'Missing required fields: sdp, conversationId, childId' }),
+        JSON.stringify({ error: 'Missing required fields: conversationId, childId' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -100,74 +101,46 @@ serve(async (req) => {
     // Build voice instructions
     const instructions = buildVoiceInstructions(child, memory)
 
-    // Configure OpenAI Realtime session
-    const sessionConfig = {
-      model: 'gpt-4o-realtime-preview-2024-12-17',
-      modalities: ['audio', 'text'],
-      voice: 'alloy', // Warm, friendly voice
-      input_audio_format: 'pcm16',
-      output_audio_format: 'pcm16',
-      input_audio_transcription: {
-        model: 'whisper-1',
-      },
-      turn_detection: {
-        type: 'server_vad',
-        threshold: 0.5,
-        prefix_padding_ms: 300,
-        silence_duration_ms: 500,
-      },
-      temperature: 0.8,
-      max_response_output_tokens: 4096,
-      instructions: instructions,
-    }
-
-    // Create multipart/form-data request
-    const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2)
-
-    const formParts = [
-      `--${boundary}`,
-      'Content-Disposition: form-data; name="sdp"',
-      '',
-      sdp,
-      `--${boundary}`,
-      'Content-Disposition: form-data; name="session_config"',
-      'Content-Type: application/json',
-      '',
-      JSON.stringify(sessionConfig),
-      `--${boundary}--`,
-    ]
-
-    const formData = formParts.join('\r\n')
-
-    // Call OpenAI Realtime API
-    const openaiResponse = await fetch('https://api.openai.com/v1/realtime/sessions', {
+    // Create ephemeral key using GA API
+    const keyResponse = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${openaiApiKey}`,
-        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Type': 'application/json',
       },
-      body: formData,
+      body: JSON.stringify({
+        model: 'gpt-realtime',
+        voice: 'alloy',
+        instructions: instructions,
+        modalities: ['audio', 'text'],
+        temperature: 0.8,
+        turn_detection: {
+          type: 'server_vad',
+          threshold: 0.5,
+          prefix_padding_ms: 300,
+          silence_duration_ms: 500,
+        },
+        input_audio_transcription: {
+          model: 'whisper-1'
+        }
+      }),
     })
 
-    if (!openaiResponse.ok) {
-      const errorText = await openaiResponse.text()
-      console.error('OpenAI Realtime API error:', errorText)
+    if (!keyResponse.ok) {
+      const errorText = await keyResponse.text()
+      console.error('OpenAI API error:', errorText)
       return new Response(
         JSON.stringify({ error: 'Failed to create realtime session', details: errorText }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    // Parse SDP answer
-    const answerSdp = await openaiResponse.text()
-
-    // Extract call ID from Location header (if provided)
-    const locationHeader = openaiResponse.headers.get('Location')
-    const callId = locationHeader?.split('/').pop()
+    const { client_secret } = await keyResponse.json()
 
     const response: RealtimeSessionResponse = {
-      sdp: answerSdp,
-      callId: callId,
+      clientSecret: client_secret,
+      model: 'gpt-realtime',
+      voice: 'alloy'
     }
 
     return new Response(
