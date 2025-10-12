@@ -1,6 +1,7 @@
 import Foundation
 import struct EkoCore.User
 import struct EkoCore.Child
+import enum EkoCore.Temperament
 import struct EkoCore.Conversation
 import struct EkoCore.Message
 import struct EkoCore.CreateConversationDTO
@@ -53,13 +54,40 @@ final class SupabaseService: @unchecked Sendable {
         )
 
         // Initialize PostgREST client for database operations
+        let anonKey = Config.Supabase.anonKey
         self.postgrestClient = PostgrestClient(
             url: url.appendingPathComponent("rest/v1"),
             schema: "public",
             headers: [
-                "apikey": Config.Supabase.anonKey,
-                "Authorization": "Bearer \(Config.Supabase.anonKey)"
-            ]
+                "apikey": anonKey
+            ],
+            fetch: { @Sendable [weak authClient, anonKey] request in
+                var authenticatedRequest = request
+                // Get the current session token and add it to headers
+                if let session = try? await authClient?.session {
+                    let accessToken = session.accessToken
+                    print("🔑 Using user token: \(accessToken.prefix(20))...")
+                    authenticatedRequest.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+                } else {
+                    print("⚠️ No session, using anon key")
+                    // Fallback to anon key if no session
+                    authenticatedRequest.setValue("Bearer \(anonKey)", forHTTPHeaderField: "Authorization")
+                }
+
+                print("📡 Request URL: \(authenticatedRequest.url?.absoluteString ?? "unknown")")
+                print("📡 Request method: \(authenticatedRequest.httpMethod ?? "unknown")")
+
+                let (data, response) = try await URLSession.shared.data(for: authenticatedRequest)
+
+                if let httpResponse = response as? HTTPURLResponse {
+                    print("📥 Response status: \(httpResponse.statusCode)")
+                    if let responseString = String(data: data, encoding: .utf8) {
+                        print("📥 Response body: \(responseString)")
+                    }
+                }
+
+                return (data, response)
+            }
         )
 
         // Initialize Functions client for Edge Functions
@@ -184,7 +212,7 @@ final class SupabaseService: @unchecked Sendable {
     }
 
     func getActiveConversation(childId: UUID) async throws -> Conversation? {
-        let response = try await postgrestClient
+        let conversations: [Conversation] = try await postgrestClient
             .from("conversations")
             .select()
             .eq("child_id", value: childId.uuidString)
@@ -192,21 +220,19 @@ final class SupabaseService: @unchecked Sendable {
             .order("updated_at", ascending: false)
             .limit(1)
             .execute()
+            .value
 
-        let conversations: [Conversation] = response.value
         return conversations.first
     }
 
     func getMessages(conversationId: UUID) async throws -> [Message] {
-        let response = try await postgrestClient
+        return try await postgrestClient
             .from("messages")
             .select()
             .eq("conversation_id", value: conversationId.uuidString)
             .order("created_at", ascending: true)
             .execute()
-
-        let messages: [Message] = response.value
-        return messages
+            .value
     }
 
     func sendMessage(
@@ -274,15 +300,13 @@ final class SupabaseService: @unchecked Sendable {
     // MARK: - Data Operations
 
     func fetchChildren(forUserId userId: UUID) async throws -> [Child] {
-        let response = try await postgrestClient
+        return try await postgrestClient
             .from("children")
             .select()
             .eq("user_id", value: userId.uuidString)
             .order("created_at", ascending: false)
             .execute()
-
-        let children: [Child] = response.value
-        return children
+            .value
     }
 
     func createChild(_ child: Child) async throws -> Child {
@@ -298,6 +322,118 @@ final class SupabaseService: @unchecked Sendable {
             .single()
             .execute()
             .value
+    }
+
+    func createChild(
+        name: String,
+        age: Int,
+        temperament: Temperament,
+        temperamentTalkative: Int = 5,
+        temperamentSensitivity: Int = 5,
+        temperamentAccountability: Int = 5
+    ) async throws -> Child {
+        // Get current user and session
+        guard let currentUser = try await getCurrentUser() else {
+            throw NSError(
+                domain: "SupabaseService",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "User not authenticated"]
+            )
+        }
+
+        // Get session token
+        let session = try await authClient.session
+        let accessToken = session.accessToken
+
+        // Create DTO for insert (without auto-generated fields)
+        struct CreateChildDTO: Encodable {
+            let userId: UUID
+            let name: String
+            let age: Int
+            let temperament: String
+            let temperamentTalkative: Int
+            let temperamentSensitivity: Int
+            let temperamentAccountability: Int
+
+            enum CodingKeys: String, CodingKey {
+                case userId = "user_id"
+                case name
+                case age
+                case temperament
+                case temperamentTalkative = "temperament_talkative"
+                case temperamentSensitivity = "temperament_sensitivity"
+                case temperamentAccountability = "temperament_accountability"
+            }
+        }
+
+        let dto = CreateChildDTO(
+            userId: currentUser.id,
+            name: name,
+            age: age,
+            temperament: temperament.rawValue,
+            temperamentTalkative: temperamentTalkative,
+            temperamentSensitivity: temperamentSensitivity,
+            temperamentAccountability: temperamentAccountability
+        )
+
+        let encoder = JSONEncoder()
+        let childData = try encoder.encode(dto)
+
+        print("🟡 Sending to Supabase:")
+        if let jsonString = String(data: childData, encoding: .utf8) {
+            print("  JSON: \(jsonString)")
+        }
+        print("🔑 Using access token: \(accessToken.prefix(30))...")
+
+        // Make direct HTTP request with proper auth header
+        var request = URLRequest(url: baseURL.appendingPathComponent("rest/v1/children"))
+        request.httpMethod = "POST"
+        request.setValue(Config.Supabase.anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("return=representation", forHTTPHeaderField: "Prefer")
+        request.httpBody = childData
+
+        print("📡 Making direct request to: \(request.url?.absoluteString ?? "unknown")")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            if let httpResponse = response as? HTTPURLResponse {
+                print("📥 Response status: \(httpResponse.statusCode)")
+                let responseString = String(data: data, encoding: .utf8)
+                if let responseString {
+                    print("📥 Response body: \(responseString)")
+                }
+
+                guard httpResponse.statusCode == 200 || httpResponse.statusCode == 201 else {
+                    throw NSError(
+                        domain: "SupabaseService",
+                        code: httpResponse.statusCode,
+                        userInfo: [NSLocalizedDescriptionKey: responseString ?? "Unknown error"]
+                    )
+                }
+            }
+
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+
+            // Response is an array with one item
+            let children = try decoder.decode([Child].self, from: data)
+            guard let result = children.first else {
+                throw NSError(
+                    domain: "SupabaseService",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "No child returned from database"]
+                )
+            }
+
+            print("🟢 Received from Supabase: \(result)")
+            return result
+        } catch {
+            print("🔴 Supabase error: \(error)")
+            throw error
+        }
     }
 
     func updateChild(_ child: Child) async throws -> Child {
