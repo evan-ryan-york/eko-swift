@@ -94,9 +94,35 @@ final class SupabaseService: @unchecked Sendable {
         self.functionsClient = FunctionsClient(
             url: url.appendingPathComponent("functions/v1"),
             headers: [
-                "apikey": Config.Supabase.anonKey,
-                "Authorization": "Bearer \(Config.Supabase.anonKey)"
-            ]
+                "apikey": anonKey
+            ],
+            fetch: { @Sendable [weak authClient, anonKey] request in
+                var authenticatedRequest = request
+                // Get the current session token and add it to headers
+                if let session = try? await authClient?.session {
+                    let accessToken = session.accessToken
+                    print("🔑 [Functions] Using user token: \(accessToken.prefix(20))...")
+                    authenticatedRequest.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+                } else {
+                    print("⚠️ [Functions] No session, using anon key")
+                    // Fallback to anon key if no session
+                    authenticatedRequest.setValue("Bearer \(anonKey)", forHTTPHeaderField: "Authorization")
+                }
+
+                print("📡 [Functions] Request URL: \(authenticatedRequest.url?.absoluteString ?? "unknown")")
+                print("📡 [Functions] Request method: \(authenticatedRequest.httpMethod ?? "unknown")")
+
+                let (data, response) = try await URLSession.shared.data(for: authenticatedRequest)
+
+                if let httpResponse = response as? HTTPURLResponse {
+                    print("📥 [Functions] Response status: \(httpResponse.statusCode)")
+                    if let responseString = String(data: data, encoding: .utf8) {
+                        print("📥 [Functions] Response body: \(responseString.prefix(200))...")
+                    }
+                }
+
+                return (data, response)
+            }
         )
     }
 
@@ -249,20 +275,68 @@ final class SupabaseService: @unchecked Sendable {
         return AsyncThrowingStream { continuation in
             Task {
                 do {
-                    // Note: For streaming responses, we may need to use a custom HTTP client
-                    // For now, invoke returns the full response
-                    struct StreamResponse: Codable {
-                        let content: String
+                    // Get session token for auth
+                    let session = try await authClient.session
+                    let accessToken = session.accessToken
+
+                    // Encode request body (DTO already has correct CodingKeys)
+                    let encoder = JSONEncoder()
+                    let bodyData = try encoder.encode(dto)
+
+                    // Debug: Print request body
+                    if let jsonString = String(data: bodyData, encoding: .utf8) {
+                        print("📤 [Streaming] Request body: \(jsonString)")
                     }
 
-                    let response: StreamResponse = try await functionsClient.invoke(
-                        "send-message",
-                        options: FunctionInvokeOptions(body: dto)
-                    )
+                    // Create streaming request
+                    var request = URLRequest(url: baseURL.appendingPathComponent("functions/v1/send-message"))
+                    request.httpMethod = "POST"
+                    request.setValue(Config.Supabase.anonKey, forHTTPHeaderField: "apikey")
+                    request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    request.httpBody = bodyData
 
-                    // For now, yield the complete response
-                    // TODO: Implement true streaming when needed
-                    continuation.yield(response.content)
+                    // Use URLSession for streaming
+                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+
+                    guard let httpResponse = response as? HTTPURLResponse else {
+                        throw NSError(domain: "SupabaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response type"])
+                    }
+
+                    print("📥 [Streaming] Response status: \(httpResponse.statusCode)")
+
+                    guard httpResponse.statusCode == 200 else {
+                        // Try to read error message from response
+                        var errorMessage = "HTTP \(httpResponse.statusCode)"
+                        do {
+                            var errorData = Data()
+                            for try await line in bytes.lines {
+                                if let lineData = line.data(using: .utf8) {
+                                    errorData.append(lineData)
+                                }
+                            }
+                            if let errorString = String(data: errorData, encoding: .utf8) {
+                                errorMessage = errorString
+                                print("📥 [Streaming] Error body: \(errorString)")
+                            }
+                        } catch {
+                            print("📥 [Streaming] Could not read error body")
+                        }
+                        throw NSError(domain: "SupabaseService", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: errorMessage])
+                    }
+
+                    // Parse SSE stream
+                    for try await line in bytes.lines {
+                        if line.hasPrefix("data: ") {
+                            let content = String(line.dropFirst(6)) // Remove "data: " prefix
+                            if !content.isEmpty {
+                                continuation.yield(content)
+                                // Yield control to prevent blocking the main thread
+                                await Task.yield()
+                            }
+                        }
+                    }
+
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)

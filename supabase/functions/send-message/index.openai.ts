@@ -41,7 +41,7 @@ serve(async (req) => {
     // Initialize Supabase client with service role (bypasses RLS)
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    const anthropicApiKey = Deno.env.get('ANTHROPIC_API_KEY')!
+    const openaiApiKey = Deno.env.get('OPENAI_API_KEY')!
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
@@ -141,39 +141,38 @@ serve(async (req) => {
     // Build personalized system prompt
     const systemPrompt = buildSystemPrompt(childContext)
 
-    // Build messages array for Claude API
-    const claudeMessages = (messageHistory || [])
-      .filter((msg: any) => msg.role !== 'system')
-      .map((msg: any) => ({
-        role: msg.role === 'assistant' ? 'assistant' : 'user',
+    // Build messages array for OpenAI
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      ...(messageHistory || []).map((msg: any) => ({
+        role: msg.role,
         content: msg.content,
-      }))
+      })),
+      { role: 'user', content: message },
+    ]
 
-    // Add current user message
-    claudeMessages.push({ role: 'user', content: message })
-
-    // Call Anthropic Claude API with streaming
-    const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
+    // Call OpenAI GPT-5 with streaming
+    const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'x-api-key': anthropicApiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
+        'Authorization': `Bearer ${openaiApiKey}`,
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        system: systemPrompt,
-        messages: claudeMessages,
+        model: 'gpt-5',
+        messages: messages,
+        reasoning_effort: 'low',
+        verbosity: 'medium',
         stream: true,
+        max_completion_tokens: 1000,
       }),
     })
 
-    if (!claudeResponse.ok) {
-      const errorText = await claudeResponse.text()
-      console.error('Claude API error:', errorText)
+    if (!openaiResponse.ok) {
+      const errorText = await openaiResponse.text()
+      console.error('OpenAI API error:', errorText)
       return new Response(
-        JSON.stringify({ error: 'Claude API error', details: errorText }),
+        JSON.stringify({ error: 'OpenAI API error', details: errorText }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -185,7 +184,7 @@ serve(async (req) => {
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          const reader = claudeResponse.body!.getReader()
+          const reader = openaiResponse.body!.getReader()
           const decoder = new TextDecoder()
 
           while (true) {
@@ -199,38 +198,37 @@ serve(async (req) => {
               if (line.startsWith('data: ')) {
                 const data = line.substring(6)
 
+                if (data === '[DONE]') {
+                  // Save complete assistant message to database
+                  await supabase
+                    .from('messages')
+                    .insert({
+                      conversation_id: conversationId,
+                      role: 'assistant',
+                      content: assistantMessage,
+                    })
+
+                  // Update conversation updated_at timestamp
+                  await supabase
+                    .from('conversations')
+                    .update({ updated_at: new Date().toISOString() })
+                    .eq('id', conversationId)
+
+                  controller.close()
+                  return
+                }
+
                 try {
                   const parsed = JSON.parse(data)
+                  const content = parsed.choices?.[0]?.delta?.content
 
-                  // Handle Claude's streaming events
-                  if (parsed.type === 'content_block_delta') {
-                    const content = parsed.delta?.text
-                    if (content) {
-                      assistantMessage += content
-                      // Send SSE event to client
-                      controller.enqueue(encoder.encode(`data: ${content}\n\n`))
-                    }
-                  } else if (parsed.type === 'message_stop') {
-                    // Save complete assistant message to database
-                    await supabase
-                      .from('messages')
-                      .insert({
-                        conversation_id: conversationId,
-                        role: 'assistant',
-                        content: assistantMessage,
-                      })
-
-                    // Update conversation updated_at timestamp
-                    await supabase
-                      .from('conversations')
-                      .update({ updated_at: new Date().toISOString() })
-                      .eq('id', conversationId)
-
-                    controller.close()
-                    return
+                  if (content) {
+                    assistantMessage += content
+                    // Send SSE event to client
+                    controller.enqueue(encoder.encode(`data: ${content}\n\n`))
                   }
                 } catch (e) {
-                  // Skip non-JSON lines or other events
+                  // Skip non-JSON lines
                   console.error('Error parsing chunk:', e)
                 }
               }

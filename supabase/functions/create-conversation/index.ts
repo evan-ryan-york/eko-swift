@@ -14,15 +14,7 @@ interface CreateConversationRequest {
   childId: string
 }
 
-interface ConversationResponse {
-  id: string
-  userId: string
-  childId: string
-  status: string
-  title: string | null
-  createdAt: string
-  updatedAt: string
-}
+// Remove manual response mapping - return database snake_case directly
 
 serve(async (req) => {
   // Handle CORS preflight requests
@@ -98,20 +90,10 @@ serve(async (req) => {
       .limit(1)
       .single()
 
-    // If active conversation exists, return it
+    // If active conversation exists, return it (snake_case from database)
     if (existingConversation) {
-      const response: ConversationResponse = {
-        id: existingConversation.id,
-        userId: existingConversation.user_id,
-        childId: existingConversation.child_id,
-        status: existingConversation.status,
-        title: existingConversation.title,
-        createdAt: existingConversation.created_at,
-        updatedAt: existingConversation.updated_at,
-      }
-
       return new Response(
-        JSON.stringify(response),
+        JSON.stringify(existingConversation),
         {
           status: 200,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -144,18 +126,9 @@ serve(async (req) => {
 
     await adminSupabase.rpc('get_or_create_child_memory', { p_child_id: childId })
 
-    const response: ConversationResponse = {
-      id: newConversation.id,
-      userId: newConversation.user_id,
-      childId: newConversation.child_id,
-      status: newConversation.status,
-      title: newConversation.title,
-      createdAt: newConversation.created_at,
-      updatedAt: newConversation.updated_at,
-    }
-
+    // Return snake_case directly from database
     return new Response(
-      JSON.stringify(response),
+      JSON.stringify(newConversation),
       {
         status: 201,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }

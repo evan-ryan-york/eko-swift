@@ -108,13 +108,22 @@ final class LyraViewModel {
                 childId: childId
             )
 
+            var chunkCount = 0
             for try await chunk in stream {
                 assistantMessage.content += chunk
+                chunkCount += 1
 
-                // Update the message in the array
-                if let index = messages.firstIndex(where: { $0.id == assistantMessage.id }) {
-                    messages[index] = assistantMessage
+                // Update UI every 5 chunks or if chunk contains newline (throttle updates)
+                if chunkCount % 5 == 0 || chunk.contains("\n") {
+                    if let index = messages.firstIndex(where: { $0.id == assistantMessage.id }) {
+                        messages[index] = assistantMessage
+                    }
                 }
+            }
+
+            // Final update to ensure all content is displayed
+            if let index = messages.firstIndex(where: { $0.id == assistantMessage.id }) {
+                messages[index] = assistantMessage
             }
 
             isLoading = false

@@ -53,7 +53,7 @@ serve(async (req) => {
     // Initialize Supabase clients
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    const anthropicApiKey = Deno.env.get('ANTHROPIC_API_KEY')!
+    const openaiApiKey = Deno.env.get('OPENAI_API_KEY')!
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
@@ -116,11 +116,11 @@ serve(async (req) => {
       )
     }
 
-    // Generate conversation title using Claude
-    const title = await generateConversationTitle(messages, child, anthropicApiKey)
+    // Generate conversation title using GPT-4
+    const title = await generateConversationTitle(messages, child, openaiApiKey)
 
-    // Extract insights using Claude
-    const insights = await extractInsights(messages, child, anthropicApiKey)
+    // Extract insights using GPT-4
+    const insights = await extractInsights(messages, child, openaiApiKey)
 
     // Update child memory with insights
     if (insights.behavioral_themes && insights.behavioral_themes.length > 0) {
@@ -192,11 +192,11 @@ serve(async (req) => {
   }
 })
 
-// Generate a concise conversation title using Claude
+// Generate a concise conversation title using GPT-4
 async function generateConversationTitle(
   messages: Array<any>,
   child: { name: string; age: number },
-  anthropicApiKey: string
+  openaiApiKey: string
 ): Promise<string> {
   const conversationText = messages
     .filter((m: any) => m.role !== 'system')
@@ -216,30 +216,31 @@ Examples:
 Conversation:
 ${conversationText.substring(0, 2000)}
 
-Respond with ONLY the title, no quotes or extra text.`
+Title:`
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'x-api-key': anthropicApiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
+        'Authorization': `Bearer ${openaiApiKey}`,
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 50,
+        model: 'gpt-5',
         messages: [{ role: 'user', content: prompt }],
+        reasoning_effort: 'low',
+        verbosity: 'low',
+        max_completion_tokens: 50,
       }),
     })
 
     if (!response.ok) {
-      console.error('Claude title generation failed')
+      console.error('OpenAI title generation failed')
       return 'Conversation with Lyra'
     }
 
     const data = await response.json()
-    let title = data.content?.[0]?.text?.trim() || 'Conversation with Lyra'
+    let title = data.choices[0]?.message?.content?.trim() || 'Conversation with Lyra'
 
     // Remove quotes if present
     title = title.replace(/^["']|["']$/g, '')
@@ -256,11 +257,11 @@ Respond with ONLY the title, no quotes or extra text.`
   }
 }
 
-// Extract insights from conversation using Claude
+// Extract insights from conversation using GPT-4
 async function extractInsights(
   messages: Array<any>,
   child: { name: string; age: number },
-  anthropicApiKey: string
+  openaiApiKey: string
 ): Promise<ConversationInsights> {
   const conversationText = messages
     .filter((m: any) => m.role !== 'system')
@@ -310,30 +311,32 @@ Guidelines:
 Conversation:
 ${conversationText.substring(0, 3000)}
 
-Return ONLY valid JSON, no other text:`
+Return ONLY valid JSON:`
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'x-api-key': anthropicApiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
+        'Authorization': `Bearer ${openaiApiKey}`,
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 800,
+        model: 'gpt-5',
         messages: [{ role: 'user', content: prompt }],
+        reasoning_effort: 'medium',
+        verbosity: 'medium',
+        max_completion_tokens: 800,
+        response_format: { type: 'json_object' },
       }),
     })
 
     if (!response.ok) {
-      console.error('Claude insights extraction failed')
+      console.error('OpenAI insights extraction failed')
       return {}
     }
 
     const data = await response.json()
-    const insightsText = data.content?.[0]?.text
+    const insightsText = data.choices[0]?.message?.content
 
     if (!insightsText) {
       return {}
