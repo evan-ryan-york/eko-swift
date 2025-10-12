@@ -55,6 +55,7 @@ final class SupabaseService: @unchecked Sendable {
 
         // Initialize PostgREST client for database operations
         let anonKey = Config.Supabase.anonKey
+
         self.postgrestClient = PostgrestClient(
             url: url.appendingPathComponent("rest/v1"),
             schema: "public",
@@ -231,10 +232,40 @@ final class SupabaseService: @unchecked Sendable {
     func createConversation(childId: UUID) async throws -> Conversation {
         let dto = CreateConversationDTO(childId: childId)
 
-        return try await functionsClient.invoke(
-            "create-conversation",
-            options: FunctionInvokeOptions(body: dto)
-        )
+        // Get session token for auth
+        let session = try await authClient.session
+        let accessToken = session.accessToken
+
+        // Encode request body
+        let encoder = JSONEncoder()
+        let bodyData = try encoder.encode(dto)
+
+        // Create request
+        var request = URLRequest(url: baseURL.appendingPathComponent("functions/v1/create-conversation"))
+        request.httpMethod = "POST"
+        request.setValue(Config.Supabase.anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = bodyData
+
+        // Make request
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NSError(domain: "SupabaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response type"])
+        }
+
+        guard httpResponse.statusCode == 200 || httpResponse.statusCode == 201 else {
+            let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw NSError(domain: "SupabaseService", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: errorMessage])
+        }
+
+        // Decode with custom decoder
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+
+        return try decoder.decode(Conversation.self, from: data)
     }
 
     func getActiveConversation(childId: UUID) async throws -> Conversation? {
@@ -348,10 +379,40 @@ final class SupabaseService: @unchecked Sendable {
     func completeConversation(conversationId: UUID) async throws -> CompleteConversationResponse {
         let dto = CompleteConversationDTO(conversationId: conversationId)
 
-        return try await functionsClient.invoke(
-            "complete-conversation",
-            options: FunctionInvokeOptions(body: dto)
-        )
+        // Get session token for auth
+        let session = try await authClient.session
+        let accessToken = session.accessToken
+
+        // Encode request body
+        let encoder = JSONEncoder()
+        let bodyData = try encoder.encode(dto)
+
+        // Create request
+        var request = URLRequest(url: baseURL.appendingPathComponent("functions/v1/complete-conversation"))
+        request.httpMethod = "POST"
+        request.setValue(Config.Supabase.anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = bodyData
+
+        // Make request
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NSError(domain: "SupabaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response type"])
+        }
+
+        guard httpResponse.statusCode == 200 else {
+            let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw NSError(domain: "SupabaseService", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: errorMessage])
+        }
+
+        // Decode with custom decoder
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+
+        return try decoder.decode(CompleteConversationResponse.self, from: data)
     }
 
     func createRealtimeSession(
