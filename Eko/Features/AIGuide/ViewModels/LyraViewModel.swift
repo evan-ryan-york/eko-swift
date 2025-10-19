@@ -14,16 +14,18 @@ final class LyraViewModel {
     var isVoiceMode = false
     private let voiceService = RealtimeVoiceService()
 
+    // Track active voice messages for real-time updates
+    private var activeUserVoiceMessageId: UUID?
+    private var activeAIVoiceMessageId: UUID?
+
+    // Map OpenAI item IDs to message UUIDs for updating transcripts
+    private var voiceItemIdToMessageId: [String: UUID] = [:]
+
+    // Track voice session start to know which messages to save
+    private var voiceSessionStartMessageCount: Int = 0
+
     var voiceStatus: RealtimeVoiceService.Status {
         voiceService.status
-    }
-
-    var userTranscript: String {
-        voiceService.userTranscript
-    }
-
-    var aiTranscript: String {
-        voiceService.aiTranscript
     }
 
     // MARK: - Conversation State
@@ -37,6 +39,93 @@ final class LyraViewModel {
     // MARK: - Initialization
     init(childId: UUID) {
         self.childId = childId
+        setupVoiceCallbacks()
+    }
+
+    private func setupVoiceCallbacks() {
+        // Called when user stops speaking (before transcript arrives)
+        voiceService.onUserAudioCommitted = { [weak self] itemId in
+            guard let self else { return }
+            Task { @MainActor in
+                self.handleUserAudioCommitted(itemId: itemId)
+            }
+        }
+
+        // Called when user's transcript is ready (update placeholder)
+        voiceService.onUserTranscriptCompleted = { [weak self] itemId, transcript in
+            guard let self else { return }
+            Task { @MainActor in
+                self.handleUserTranscriptCompleted(itemId: itemId, transcript: transcript)
+            }
+        }
+
+        voiceService.onAITranscriptDelta = { [weak self] delta in
+            guard let self else { return }
+            Task { @MainActor in
+                self.handleAITranscriptDelta(delta)
+            }
+        }
+
+        voiceService.onAITranscriptDone = { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in
+                self.handleAITranscriptDone()
+            }
+        }
+    }
+
+    // MARK: - Voice Transcript Handlers
+    private func handleUserAudioCommitted(itemId: String) {
+        // Create placeholder message when user stops speaking (before transcript arrives)
+        let userMessage = Message(
+            id: UUID(),
+            conversationId: conversationId,
+            role: .user,
+            content: "...", // Placeholder until transcript arrives
+            timestamp: Date()
+        )
+        messages.append(userMessage)
+        voiceItemIdToMessageId[itemId] = userMessage.id
+        activeUserVoiceMessageId = userMessage.id
+    }
+
+    private func handleUserTranscriptCompleted(itemId: String, transcript: String) {
+        // Update placeholder message with actual transcript
+        guard let messageId = voiceItemIdToMessageId[itemId],
+              let index = messages.firstIndex(where: { $0.id == messageId }) else {
+            print("⚠️ [ViewModel] Could not find message for item \(itemId)")
+            return
+        }
+
+        messages[index].content = transcript
+        voiceItemIdToMessageId.removeValue(forKey: itemId)
+    }
+
+    private func handleAITranscriptDelta(_ delta: String) {
+        // Stream AI response - create or update message
+        if let messageId = activeAIVoiceMessageId,
+           let index = messages.firstIndex(where: { $0.id == messageId }) {
+            // Update existing message
+            messages[index].content += delta
+        } else {
+            // Create new AI message
+            let aiMessage = Message(
+                id: UUID(),
+                conversationId: conversationId,
+                role: .assistant,
+                content: delta,
+                timestamp: Date()
+            )
+            messages.append(aiMessage)
+            activeAIVoiceMessageId = aiMessage.id
+        }
+    }
+
+    private func handleAITranscriptDone() {
+        // AI finished speaking - mark message as complete
+        print("✅ [ViewModel] AI transcript complete")
+        // Reset active message ID
+        activeAIVoiceMessageId = nil
     }
 
     // MARK: - Conversation Management
@@ -142,6 +231,9 @@ final class LyraViewModel {
         do {
             isVoiceMode = true
 
+            // Track starting message count to know which messages to save later
+            voiceSessionStartMessageCount = messages.count
+
             // Create conversation if needed
             if conversationId == nil {
                 let conversation = try await supabase.createConversation(childId: childId)
@@ -154,7 +246,8 @@ final class LyraViewModel {
 
             try await voiceService.startSession(
                 conversationId: conversationId,
-                childId: childId
+                childId: childId,
+                previousMessages: messages
             )
         } catch {
             self.error = error
@@ -163,34 +256,29 @@ final class LyraViewModel {
         }
     }
 
-    func endVoiceMode() {
+    func endVoiceMode() async {
         voiceService.endSession()
         isVoiceMode = false
 
-        // Add voice transcripts to text chat
-        if !voiceService.userTranscript.isEmpty {
-            messages.append(Message(
-                id: UUID(),
-                conversationId: conversationId,
-                role: .user,
-                content: voiceService.userTranscript,
-                timestamp: Date()
-            ))
+        // Save new voice messages to database
+        let newMessages = Array(messages.suffix(from: voiceSessionStartMessageCount))
+        if !newMessages.isEmpty {
+            do {
+                try await supabase.saveVoiceMessages(newMessages)
+                print("✅ [ViewModel] Saved \(newMessages.count) voice messages to database")
+            } catch {
+                print("❌ [ViewModel] Failed to save voice messages: \(error)")
+                self.error = error
+            }
         }
 
-        if !voiceService.aiTranscript.isEmpty {
-            messages.append(Message(
-                id: UUID(),
-                conversationId: conversationId,
-                role: .assistant,
-                content: voiceService.aiTranscript,
-                timestamp: Date()
-            ))
-        }
-    }
+        // Reset active voice message IDs
+        activeUserVoiceMessageId = nil
+        activeAIVoiceMessageId = nil
+        voiceItemIdToMessageId.removeAll()
+        voiceSessionStartMessageCount = 0
 
-    func interruptAI() {
-        voiceService.interrupt()
+        print("🔚 [ViewModel] Voice mode ended")
     }
 
     // MARK: - Conversation Completion

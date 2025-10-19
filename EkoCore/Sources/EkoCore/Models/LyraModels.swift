@@ -126,22 +126,18 @@ public struct ConversationInsights: Codable, Sendable {
 
 // MARK: - Create Realtime Session DTO
 public struct CreateRealtimeSessionDTO: Codable, Sendable {
-    public let sdp: String
     public let conversationId: UUID
     public let childId: UUID
 
     public init(
-        sdp: String,
         conversationId: UUID,
         childId: UUID
     ) {
-        self.sdp = sdp
         self.conversationId = conversationId
         self.childId = childId
     }
 
     enum CodingKeys: String, CodingKey {
-        case sdp
         case conversationId
         case childId
     }
@@ -149,19 +145,23 @@ public struct CreateRealtimeSessionDTO: Codable, Sendable {
 
 // MARK: - Realtime Session Response
 public struct RealtimeSessionResponse: Codable, Sendable {
-    public let sdp: String
-    public let callId: String?
+    public let clientSecret: String
+    public let model: String
+    public let voice: String
 
     public init(
-        sdp: String,
-        callId: String?
+        clientSecret: String,
+        model: String,
+        voice: String
     ) {
-        self.sdp = sdp
-        self.callId = callId
+        self.clientSecret = clientSecret
+        self.model = model
+        self.voice = voice
     }
 
     enum CodingKeys: String, CodingKey {
-        case sdp
-        case callId
+        case clientSecret
+        case model
+        case voice
     }
 }

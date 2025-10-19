@@ -14,6 +14,7 @@
 		1DB808092E9A78910019B896 /* PostgREST in Frameworks */ = {isa = PBXBuildFile; productRef = 1DB808082E9A78910019B896 /* PostgREST */; };
 		1DB8080B2E9A78910019B896 /* Realtime in Frameworks */ = {isa = PBXBuildFile; productRef = 1DB8080A2E9A78910019B896 /* Realtime */; };
 		1DB8080D2E9A78910019B896 /* Storage in Frameworks */ = {isa = PBXBuildFile; productRef = 1DB8080C2E9A78910019B896 /* Storage */; };
+		1DB8082A2E9C3D2B0019B896 /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = 1DB808292E9C3D2B0019B896 /* WebRTC */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -51,6 +52,7 @@
 				1DB8080D2E9A78910019B896 /* Storage in Frameworks */,
 				1DB808072E9A78910019B896 /* Functions in Frameworks */,
 				1DB8080B2E9A78910019B896 /* Realtime in Frameworks */,
+				1DB8082A2E9C3D2B0019B896 /* WebRTC in Frameworks */,
 				1DB808052E9A78910019B896 /* Auth in Frameworks */,
 				1DB808092E9A78910019B896 /* PostgREST in Frameworks */,
 			);
@@ -102,6 +104,7 @@
 				1DB808082E9A78910019B896 /* PostgREST */,
 				1DB8080A2E9A78910019B896 /* Realtime */,
 				1DB8080C2E9A78910019B896 /* Storage */,
+				1DB808292E9C3D2B0019B896 /* WebRTC */,
 			);
 			productName = Eko;
 			productReference = 1DADC91D2E99B51E00EBD1FC /* Eko.app */;
@@ -135,6 +138,7 @@
 				1DADC94F2E99D1AB00EBD1FC /* XCLocalSwiftPackageReference "EkoCore" */,
 				1DADC9522E99D1BA00EBD1FC /* XCLocalSwiftPackageReference "EkoKit" */,
 				1DB808032E9A78910019B896 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+				1DB808282E9C3D2B0019B896 /* XCRemoteSwiftPackageReference "WebRTC" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1DADC91E2E99B51E00EBD1FC /* Products */;
@@ -293,6 +297,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WDDXQKN8VJ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Eko/Info.plist;
@@ -326,6 +331,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WDDXQKN8VJ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Eko/Info.plist;
@@ -395,6 +401,14 @@
 				minimumVersion = 2.5.1;
 			};
 		};
+		1DB808282E9C3D2B0019B896 /* XCRemoteSwiftPackageReference "WebRTC" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stasel/WebRTC";
+			requirement = {
+				kind = exactVersion;
+				version = 120.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -430,6 +444,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 1DB808032E9A78910019B896 /* XCRemoteSwiftPackageReference "supabase-swift" */;
 			productName = Storage;
+		};
+		1DB808292E9C3D2B0019B896 /* WebRTC */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1DB808282E9C3D2B0019B896 /* XCRemoteSwiftPackageReference "WebRTC" */;
+			productName = WebRTC;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

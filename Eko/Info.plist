@@ -15,5 +15,9 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Lyra needs microphone access for voice conversations with your AI parenting coach.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Lyra uses speech recognition to transcribe your voice conversations.</string>
 </dict>
 </plist>

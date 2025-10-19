@@ -1,13 +1,20 @@
 import Foundation
 import AVFoundation
-// TODO: Add WebRTC Package via SPM: https://github.com/stasel/WebRTC
-// import WebRTC
+import EkoCore
+
+// MARK: - WebRTC Conditional Import
+// NOTE: WebRTC package has SPM dependency issues. See WEBRTC_SETUP.md for manual installation.
+#if canImport(WebRTC)
+import WebRTC
+#endif
 
 // MARK: - Voice Error
 enum VoiceError: LocalizedError {
     case microphonePermissionDenied
     case realtimeError(String)
     case connectionFailed
+    case sessionCreationFailed
+    case timeout
     case webRTCNotAvailable
 
     var errorDescription: String? {
@@ -18,8 +25,12 @@ enum VoiceError: LocalizedError {
             return "Voice error: \(message)"
         case .connectionFailed:
             return "Failed to connect voice session"
+        case .sessionCreationFailed:
+            return "Failed to create realtime session"
+        case .timeout:
+            return "Connection timeout - please try again"
         case .webRTCNotAvailable:
-            return "WebRTC package not yet installed. Add via SPM: https://github.com/stasel/WebRTC"
+            return "Voice mode requires WebRTC framework. Please see WEBRTC_SETUP.md for installation instructions."
         }
     }
 }
@@ -27,7 +38,7 @@ enum VoiceError: LocalizedError {
 // MARK: - Realtime Voice Service
 @MainActor
 @Observable
-final class RealtimeVoiceService {
+final class RealtimeVoiceService: NSObject {
     // MARK: - State
     enum Status {
         case disconnected
@@ -37,124 +48,267 @@ final class RealtimeVoiceService {
     }
 
     var status: Status = .disconnected
-    var userTranscript: String = ""
-    var aiTranscript: String = ""
 
-    // MARK: - WebRTC Components (Placeholder - requires WebRTC package)
-    // private var peerConnection: RTCPeerConnection?
-    // private var audioTrack: RTCAudioTrack?
-    // private var dataChannel: RTCDataChannel?
-    // private let factory: RTCPeerConnectionFactory
+    // MARK: - Transcript Callbacks
+    var onUserAudioCommitted: ((String) -> Void)? // Called when user stops speaking (before transcript)
+    var onUserTranscriptCompleted: ((String, String) -> Void)? // Called with (itemId, transcript)
+    var onAITranscriptDelta: ((String) -> Void)?
+    var onAITranscriptDone: (() -> Void)?
+
+    // MARK: - WebRTC Components
+    #if canImport(WebRTC)
+    private var peerConnection: RTCPeerConnection?
+    private var audioTrack: RTCAudioTrack?
+    private var dataChannel: RTCDataChannel?
+    private let factory: RTCPeerConnectionFactory
+    #endif
 
     // MARK: - Dependencies
     private let supabase = SupabaseService.shared
 
     // MARK: - Initialization
-    init() {
-        // TODO: Initialize WebRTC after adding package
-        // RTCInitializeSSL()
-        // self.factory = RTCPeerConnectionFactory()
+    override init() {
+        #if canImport(WebRTC)
+        RTCInitializeSSL()
+        self.factory = RTCPeerConnectionFactory()
+        #endif
+        super.init()
     }
 
     // MARK: - Session Management
-    func startSession(conversationId: UUID, childId: UUID) async throws {
+    func startSession(conversationId: UUID, childId: UUID, previousMessages: [Message] = []) async throws {
+        #if canImport(WebRTC)
         status = .connecting
 
-        // TODO: Implement full WebRTC flow after adding package
-        // This is a placeholder implementation
-        throw VoiceError.webRTCNotAvailable
+        // Start session without timeout for now (Swift 6 concurrency simplification)
+        do {
+            // 1. Request microphone permission
+            let granted = await self.requestMicrophonePermission()
+            guard granted else {
+                await MainActor.run {
+                    self.status = .disconnected
+                }
+                throw VoiceError.microphonePermissionDenied
+            }
 
-        /*
-        // 1. Request microphone permission
-        let granted = await requestMicrophonePermission()
-        guard granted else {
-            status = .disconnected
-            throw VoiceError.microphonePermissionDenied
+            // 2. Configure audio session
+            try self.configureAudioSession()
+
+            // 3. Get ephemeral key from backend
+            let sessionResponse = try await self.supabase.createRealtimeSession(
+                conversationId: conversationId,
+                childId: childId
+            )
+
+            // 4. Create peer connection
+            let config = RTCConfiguration()
+            config.iceServers = [
+                RTCIceServer(urlStrings: ["stun:stun.l.google.com:19302"])
+            ]
+
+            let constraints = RTCMediaConstraints(
+                mandatoryConstraints: nil,
+                optionalConstraints: nil
+            )
+
+            await MainActor.run {
+                self.peerConnection = self.factory.peerConnection(
+                    with: config,
+                    constraints: constraints,
+                    delegate: self
+                )
+            }
+
+            guard let peerConnection = self.peerConnection else {
+                throw VoiceError.connectionFailed
+            }
+
+            // 5. Add local audio track
+            let audioConstraints = RTCMediaConstraints(
+                mandatoryConstraints: nil,
+                optionalConstraints: nil
+            )
+            let audioSource = self.factory.audioSource(with: audioConstraints)
+            let audioTrack = self.factory.audioTrack(with: audioSource, trackId: "audio0")
+            peerConnection.add(audioTrack, streamIds: ["stream0"])
+
+            await MainActor.run {
+                self.audioTrack = audioTrack
+            }
+
+            // 6. Create data channel for events
+            let dataConfig = RTCDataChannelConfiguration()
+            let dataChannel = peerConnection.dataChannel(
+                forLabel: "oai-events",
+                configuration: dataConfig
+            )
+            dataChannel?.delegate = self
+
+            await MainActor.run {
+                self.dataChannel = dataChannel
+            }
+
+            // 7. Create SDP offer
+            let offerConstraints = RTCMediaConstraints(
+                mandatoryConstraints: ["OfferToReceiveAudio": "true"],
+                optionalConstraints: nil
+            )
+            let offer = try await peerConnection.offer(for: offerConstraints)
+            try await peerConnection.setLocalDescription(offer)
+
+            // 8. Connect to OpenAI using ephemeral key
+            let answerSdp = try await self.connectToOpenAI(
+                offer: offer.sdp,
+                clientSecret: sessionResponse.clientSecret
+            )
+
+            // 9. Set remote description
+            let answer = RTCSessionDescription(type: .answer, sdp: answerSdp)
+            try await peerConnection.setRemoteDescription(answer)
+
+            await MainActor.run {
+                self.status = .connected
+            }
+
+            // Session is already configured by Edge Function, no need to update
+            // Send conversation history for context (disabled to prevent looping)
+            // TODO: Re-enable with proper response suppression
+            print("⚠️ [Voice] Connected - conversation history disabled to prevent response loop")
+        } catch {
+            await MainActor.run {
+                self.status = .error(error)
+            }
+            throw error
+        }
+        #else
+        throw VoiceError.webRTCNotAvailable
+        #endif
+    }
+
+    private func connectToOpenAI(offer: String, clientSecret: String) async throws -> String {
+        // Make direct call to OpenAI Realtime API with SDP offer (GA endpoint)
+        guard let url = URL(string: "https://api.openai.com/v1/realtime/calls") else {
+            throw VoiceError.connectionFailed
         }
 
-        // 2. Configure audio session
-        try configureAudioSession()
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(clientSecret)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/sdp", forHTTPHeaderField: "Content-Type")
+        request.httpBody = offer.data(using: .utf8)
 
-        // 3. Create peer connection
-        let config = RTCConfiguration()
-        config.iceServers = [RTCIceServer(urlStrings: ["stun:stun.l.google.com:19302"])]
+        print("🌐 [WebRTC] Connecting to OpenAI /v1/realtime/calls")
+        print("🔑 [WebRTC] Using ephemeral key: \(clientSecret.prefix(20))...")
 
-        let constraints = RTCMediaConstraints(
-            mandatoryConstraints: nil,
-            optionalConstraints: nil
-        )
+        let (data, response) = try await URLSession.shared.data(for: request)
 
-        peerConnection = factory.peerConnection(
-            with: config,
-            constraints: constraints,
-            delegate: self
-        )
+        guard let httpResponse = response as? HTTPURLResponse else {
+            print("❌ [WebRTC] Invalid HTTP response")
+            throw VoiceError.connectionFailed
+        }
 
-        // 4. Add audio track
-        let audioSource = factory.audioSource(with: nil)
-        audioTrack = factory.audioTrack(with: audioSource, trackId: "audio0")
-        peerConnection?.add(audioTrack!, streamIds: ["stream0"])
+        print("📥 [WebRTC] OpenAI response status: \(httpResponse.statusCode)")
 
-        // 5. Create data channel for events
-        let dataConfig = RTCDataChannelConfiguration()
-        dataChannel = peerConnection?.dataChannel(
-            forLabel: "oai-events",
-            configuration: dataConfig
-        )
-        dataChannel?.delegate = self
+        if !(200...299).contains(httpResponse.statusCode) {
+            let errorBody = String(data: data, encoding: .utf8) ?? "Unable to decode error body"
+            print("❌ [WebRTC] OpenAI error response: \(errorBody)")
+            print("❌ [WebRTC] Response headers: \(httpResponse.allHeaderFields)")
+            throw VoiceError.connectionFailed
+        }
 
-        // 6. Create SDP offer
-        let offer = try await peerConnection!.offer(for: RTCMediaConstraints(
-            mandatoryConstraints: ["OfferToReceiveAudio": "true"],
-            optionalConstraints: nil
-        ))
-        try await peerConnection!.setLocalDescription(offer)
+        guard let answerSdp = String(data: data, encoding: .utf8) else {
+            print("❌ [WebRTC] Failed to decode SDP answer from OpenAI")
+            throw VoiceError.connectionFailed
+        }
 
-        // 7. Send to backend
-        let response = try await supabase.createRealtimeSession(
-            sdp: offer.sdp,
-            conversationId: conversationId,
-            childId: childId
-        )
+        print("✅ [WebRTC] Successfully received SDP answer from OpenAI")
+        return answerSdp
+    }
 
-        // 8. Set remote description
-        let answer = RTCSessionDescription(type: .answer, sdp: response.sdp)
-        try await peerConnection!.setRemoteDescription(answer)
 
-        status = .connected
-        */
+    func sendConversationHistory(_ messages: [Message]) async throws {
+        #if canImport(WebRTC)
+        // Send conversation history to OpenAI for context
+        // Limit to last 20 messages to avoid token limits
+        let recentMessages = Array(messages.suffix(20))
+
+        guard !recentMessages.isEmpty else {
+            print("📜 [Voice] No conversation history to send")
+            return
+        }
+
+        print("📜 [Voice] Sending \(recentMessages.count) messages for context")
+
+        for message in recentMessages {
+            // Create conversation.item.create event for each message
+            let conversationItem: [String: Any] = [
+                "type": "conversation.item.create",
+                "item": [
+                    "type": "message",
+                    "role": message.role.rawValue,
+                    "content": [
+                        [
+                            "type": "input_text",
+                            "text": message.content
+                        ]
+                    ]
+                ]
+            ]
+
+            if let data = try? JSONSerialization.data(withJSONObject: conversationItem) {
+                let buffer = RTCDataBuffer(data: data, isBinary: false)
+                dataChannel?.sendData(buffer)
+            }
+
+            // Small delay to avoid overwhelming the data channel
+            try await Task.sleep(nanoseconds: 10_000_000) // 10ms
+        }
+
+        print("✅ [Voice] Conversation history sent")
+        #endif
     }
 
     func interrupt() {
-        // TODO: Implement after adding WebRTC package
-        /*
-        // Send cancel event via data channel
+        #if canImport(WebRTC)
+        // Send response.cancel event via data channel
         let event = ["type": "response.cancel"]
         if let data = try? JSONSerialization.data(withJSONObject: event) {
             let buffer = RTCDataBuffer(data: data, isBinary: false)
             dataChannel?.sendData(buffer)
         }
-        */
+        #endif
     }
 
     func endSession() {
-        // TODO: Implement after adding WebRTC package
-        /*
+        #if canImport(WebRTC)
         audioTrack = nil
         dataChannel = nil
         peerConnection?.close()
         peerConnection = nil
-        */
+        #endif
         status = .disconnected
-        userTranscript = ""
-        aiTranscript = ""
     }
 
     // MARK: - Audio Configuration
     private func configureAudioSession() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker])
+
+        // Configure for voice chat with echo cancellation
+        // Note: Echo cancellation works best on real devices with headphones
+        // The simulator may pick up speaker output through the microphone
+        try session.setCategory(
+            .playAndRecord,
+            mode: .voiceChat,
+            options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP]
+        )
+
+        // Enable hardware voice processing for better echo cancellation
+        try session.setPreferredInputNumberOfChannels(1)
+        try session.setPreferredSampleRate(24000) // Match OpenAI's audio rate
+
         try session.setActive(true)
+
+        print("🎧 [Audio] Session configured with echo cancellation (mode: voiceChat)")
     }
 
     private func requestMicrophonePermission() async -> Bool {
@@ -164,13 +318,33 @@ final class RealtimeVoiceService {
             }
         }
     }
+
+    // MARK: - Timeout Helper
+    private func withTimeout<T: Sendable>(
+        seconds: TimeInterval,
+        operation: @Sendable @escaping () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await operation()
+            }
+
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw VoiceError.timeout
+            }
+
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
+        }
+    }
 }
 
-// MARK: - RTCPeerConnectionDelegate (Placeholder)
-// TODO: Uncomment after adding WebRTC package
-/*
+// MARK: - RTCPeerConnectionDelegate
+#if canImport(WebRTC)
 extension RealtimeVoiceService: RTCPeerConnectionDelegate {
-    func peerConnection(_ peerConnection: RTCPeerConnection, didChange state: RTCIceConnectionState) {
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didChange state: RTCIceConnectionState) {
         print("ICE connection state: \(state)")
         if state == .failed || state == .disconnected {
             Task { @MainActor in
@@ -179,46 +353,46 @@ extension RealtimeVoiceService: RTCPeerConnectionDelegate {
         }
     }
 
-    func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {
-        // ICE candidates handled automatically in our setup
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {
+        // ICE candidates handled automatically
     }
 
-    func peerConnection(_ peerConnection: RTCPeerConnection, didAdd stream: RTCMediaStream) {
-        // Handle incoming audio stream
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didAdd stream: RTCMediaStream) {
+        print("Added media stream")
     }
 
-    func peerConnection(_ peerConnection: RTCPeerConnection, didRemove stream: RTCMediaStream) {
-        // Handle stream removal
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didRemove stream: RTCMediaStream) {
+        print("Removed media stream")
     }
 
-    func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {
-        // Handle negotiation
+    nonisolated func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {
+        print("Should negotiate")
     }
 
-    func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {
         print("ICE gathering state: \(newState)")
     }
 
-    func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCSignalingState) {
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCSignalingState) {
         print("Signaling state: \(newState)")
     }
 
-    func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {
-        // Handle removed candidates
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {
+        print("Removed ICE candidates")
     }
 
-    func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {
-        // Handle opened data channel
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {
+        print("Data channel opened: \(dataChannel.label)")
     }
 }
 
-// MARK: - RTCDataChannelDelegate (Placeholder)
+// MARK: - RTCDataChannelDelegate
 extension RealtimeVoiceService: RTCDataChannelDelegate {
-    func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {
+    nonisolated func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {
         print("Data channel state: \(dataChannel.readyState)")
     }
 
-    func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
+    nonisolated func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
         guard let json = try? JSONSerialization.jsonObject(with: buffer.data) as? [String: Any],
               let eventType = json["type"] as? String else {
             return
@@ -226,29 +400,54 @@ extension RealtimeVoiceService: RTCDataChannelDelegate {
 
         Task { @MainActor in
             switch eventType {
-            case "conversation.item.input_audio_transcription.completed":
-                if let transcript = json["transcript"] as? String {
-                    userTranscript = transcript
+            // User audio committed - create placeholder before transcription completes
+            case "input_audio_buffer.committed":
+                if let itemId = json["item_id"] as? String {
+                    print("🎤 [Voice] User audio committed (item: \(itemId))")
+                    onUserAudioCommitted?(itemId)
                 }
 
+            // User transcript completed - update placeholder with actual text
+            case "conversation.item.input_audio_transcription.completed":
+                if let itemId = json["item_id"] as? String,
+                   let transcript = json["transcript"] as? String {
+                    print("📝 [Voice] User transcript: \(transcript)")
+                    onUserTranscriptCompleted?(itemId, transcript)
+                } else {
+                    print("⚠️ [Voice] User transcript event missing data")
+                }
+
+            // AI response streaming
             case "response.output_audio_transcript.delta":
                 if let delta = json["delta"] as? String {
-                    aiTranscript += delta
+                    onAITranscriptDelta?(delta)
                 }
 
             case "response.output_audio_transcript.done":
-                // AI finished speaking
-                break
+                onAITranscriptDone?()
 
+            // Error handling
             case "error":
-                if let error = json["error"] as? String {
-                    status = .error(VoiceError.realtimeError(error))
+                if let errorDict = json["error"] as? [String: Any],
+                   let message = errorDict["message"] as? String {
+                    print("❌ [Voice] Error: \(message)")
+                    status = .error(VoiceError.realtimeError(message))
+                }
+
+            // Session confirmation
+            case "session.created", "session.updated":
+                if let session = json["session"] as? [String: Any],
+                   let audio = session["audio"] as? [String: Any],
+                   let input = audio["input"] as? [String: Any] {
+                    let hasTranscription = input["transcription"] != nil
+                    print("✅ [Voice] Session configured (transcription: \(hasTranscription ? "enabled" : "disabled"))")
                 }
 
             default:
+                // Silently ignore other event types (response.created, conversation.item.added, etc.)
                 break
             }
         }
     }
 }
-*/
+#endif

@@ -1,9 +1,9 @@
 # Lyra: On-Demand AI Parenting Guide - Native iOS Implementation
 
-**Version**: 3.0 (Native iOS)
-**Last Updated**: October 11, 2025
+**Version**: 3.1 (Native iOS + GA API)
+**Last Updated**: October 19, 2025
 **Platform**: iOS 17.0+ (Swift 6 + SwiftUI)
-**Status**: Ready for Implementation
+**Status**: ✅ Implemented & Working (GA API)
 
 ## Overview
 
@@ -315,6 +315,7 @@ extension RealtimeVoiceService: RTCDataChannelDelegate {
 
         Task { @MainActor in
             switch eventType {
+            // GA API event names (updated October 2025)
             case "conversation.item.input_audio_transcription.completed":
                 if let transcript = json["transcript"] as? String {
                     userTranscript = transcript
@@ -329,13 +330,18 @@ extension RealtimeVoiceService: RTCDataChannelDelegate {
                 // AI finished speaking
                 break
 
+            case "response.done":
+                // Full response complete
+                break
+
             case "error":
-                if let error = json["error"] as? String {
-                    status = .error(VoiceError.realtimeError(error))
+                if let errorDict = json["error"] as? [String: Any],
+                   let message = errorDict["message"] as? String {
+                    status = .error(VoiceError.realtimeError(message))
                 }
 
             default:
-                break
+                print("Unhandled event type: \(eventType)")
             }
         }
     }
@@ -1067,15 +1073,18 @@ struct ChatInputBar: View {
 }
 
 Supabase Edge Functions
-Create Realtime Session
+Create Realtime Session (GA API)
+**Note**: Uses ephemeral key approach (not SDP proxy). The iOS client handles WebRTC SDP exchange directly with OpenAI.
+
 typescript// supabase/functions/create-realtime-session/index.ts
+// Updated for OpenAI Realtime GA API (October 2025)
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 serve(async (req) => {
   try {
-    const { sdp, conversationId, childId } = await req.json()
+    const { conversationId, childId } = await req.json()
 
     // Get child context
     const supabase = createClient(
@@ -1089,82 +1098,45 @@ serve(async (req) => {
       .eq('id', childId)
       .single()
 
-    // Build voice system prompt
-    const instructions = `You are Lyra, an empathetic AI parenting coach helping with ${child.name}, age ${child.age}.
+    // Build voice instructions (used in Edge Function only, not in ephemeral key)
+    const instructions = buildVoiceInstructions(child, child.memory)
 
-# Personality
-Warm, concise, confident. Speak naturally in 2-3 sentences per turn.
-
-# Child Context
-- Talkative: ${child.temperament.talkative}/10
-- Sensitivity: ${child.temperament.sensitivity}/10
-- Accountability: ${child.temperament.accountability}/10
-
-Recent themes: ${child.memory?.behavioral_themes?.map(t => t.theme).join(', ') || 'None yet'}
-
-# Instructions
-- Provide specific, actionable advice
-- Ask clarifying questions when needed
-- Reference child's characteristics
-- Keep responses brief for conversation flow
-
-# Safety
-- Flag child safety concerns immediately
-- Escalate to human if needed`
-
-    // Session config
-    const sessionConfig = {
-      model: 'gpt-realtime-2024-10-01',
-      modalities: ['audio', 'text'],
-      voice: 'alloy',
-      audio: {
-        format: 'pcm16',
-        sample_rate: 24000
-      },
-      turn_detection: {
-        type: 'semantic_vad',
-        threshold: 0.5,
-        prefix_padding_ms: 300,
-        silence_duration_ms: 200
-      },
-      temperature: 0.8,
-      instructions
-    }
-
-    // Create multipart form
-    const boundary = '----WebKitFormBoundary7MA4YWxkTrZu0gW'
-    const formData = [
-      `--${boundary}`,
-      'Content-Disposition: form-data; name="sdp"',
-      '',
-      sdp,
-      `--${boundary}`,
-      'Content-Disposition: form-data; name="session_config"',
-      'Content-Type: application/json',
-      '',
-      JSON.stringify(sessionConfig),
-      `--${boundary}--`
-    ].join('\r\n')
-
-    // Call OpenAI Realtime API
-    const response = await fetch('https://api.openai.com/v1/realtime/calls', {
+    // Create ephemeral key using GA API endpoint
+    // https://platform.openai.com/docs/api-reference/realtime-sessions/create-realtime-client-secret
+    const keyResponse = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
-        'Content-Type': `multipart/form-data; boundary=${boundary}`
+        'Content-Type': 'application/json',
       },
-      body: formData
+      body: JSON.stringify({
+        session: {
+          type: 'realtime',
+          model: 'gpt-realtime',
+          audio: {
+            output: { voice: 'alloy' }
+          }
+        }
+      }),
     })
 
-    if (!response.ok) {
-      throw new Error(`OpenAI API error: ${response.statusText}`)
+    if (!keyResponse.ok) {
+      const errorText = await keyResponse.text()
+      console.error('OpenAI API error:', errorText)
+      throw new Error('Failed to create realtime session')
     }
 
-    const answerSdp = await response.text()
-    const callId = response.headers.get('Location')?.split('/').pop()
+    const openaiResponse = await keyResponse.json()
+
+    // GA API returns {value: "ek_..."} directly
+    const clientSecretValue = openaiResponse.value
 
     return new Response(
-      JSON.stringify({ sdp: answerSdp, callId }),
+      JSON.stringify({
+        clientSecret: clientSecretValue,
+        model: 'gpt-realtime',
+        voice: 'alloy'
+      }),
       { headers: { 'Content-Type': 'application/json' } }
     )
 
@@ -1175,6 +1147,75 @@ Recent themes: ${child.memory?.behavioral_themes?.map(t => t.theme).join(', ') |
     )
   }
 })
+
+function buildVoiceInstructions(child: any, memory: any): string {
+  // Build personalized voice instructions for session configuration
+  // (sent via data channel after WebRTC connection)
+  return `You are Lyra, helping parent with ${child.name}, age ${child.age}...`
+}
+
+### iOS WebRTC Implementation (GA API)
+
+The iOS client uses the **ephemeral key approach** to connect to OpenAI's Realtime API:
+
+```swift
+// 1. Get ephemeral key from Edge Function
+let sessionResponse = try await supabase.createRealtimeSession(
+    conversationId: conversationId,
+    childId: childId
+)
+
+// 2. Create SDP offer
+let offer = try await peerConnection.offer(for: constraints)
+try await peerConnection.setLocalDescription(offer)
+
+// 3. POST SDP to OpenAI with ephemeral key
+let answerSdp = try await connectToOpenAI(
+    offer: offer.sdp,
+    clientSecret: sessionResponse.clientSecret
+)
+
+private func connectToOpenAI(offer: String, clientSecret: String) async throws -> String {
+    // GA API endpoint
+    let url = URL(string: "https://api.openai.com/v1/realtime/calls")!
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("Bearer \(clientSecret)", forHTTPHeaderField: "Authorization")
+    request.setValue("application/sdp", forHTTPHeaderField: "Content-Type")
+    request.httpBody = offer.data(using: .utf8)
+
+    let (data, response) = try await URLSession.shared.data(for: request)
+
+    guard let httpResponse = response as? HTTPURLResponse else {
+        throw VoiceError.connectionFailed
+    }
+
+    // IMPORTANT: Accept 2xx range, OpenAI returns 201 Created
+    guard (200...299).contains(httpResponse.statusCode) else {
+        throw VoiceError.connectionFailed
+    }
+
+    guard let answerSdp = String(data: data, encoding: .utf8) else {
+        throw VoiceError.connectionFailed
+    }
+
+    return answerSdp
+}
+
+// 4. Set remote description
+let answer = RTCSessionDescription(type: .answer, sdp: answerSdp)
+try await peerConnection.setRemoteDescription(answer)
+```
+
+**Key Implementation Notes (Learned during GA migration):**
+
+1. **Ephemeral Key Endpoint**: Use `/v1/realtime/client_secrets` not `/v1/realtime/sessions`
+2. **Request Format**: Must wrap config in `session` object
+3. **Response Format**: OpenAI returns `{value: "ek_..."}` directly
+4. **WebRTC SDP Endpoint**: Use `/v1/realtime/calls` not `/v1/realtime`
+5. **HTTP Status**: Accept entire 2xx range (OpenAI returns 201 Created)
+6. **Event Names**: Use `response.output_audio_transcript.*` not `response.audio_transcript.*`
 
 Dependencies
 iOS (Swift Package Manager)
