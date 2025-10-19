@@ -25,7 +25,7 @@ struct ChatInputBar: View {
             Button(action: onVoiceTap) {
                 Image(systemName: "mic.fill")
                     .foregroundStyle(Color.ekoPrimary)
-                    .font(.title2)
+                    .font(.ekoTitle3)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
@@ -39,7 +39,7 @@ struct ChatInputBar: View {
                 } else {
                     Image(systemName: "arrow.up.circle.fill")
                         .foregroundStyle(Color.ekoPrimary)
-                        .font(.title2)
+                        .font(.ekoTitle3)
                 }
             }
             .frame(width: 44, height: 44)

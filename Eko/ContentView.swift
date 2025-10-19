@@ -7,6 +7,7 @@
 
 import SwiftUI
 import EkoCore
+import EkoKit
 
 struct ContentView: View {
     @State private var selectedTab: Tab = .home
@@ -37,7 +38,13 @@ struct ContentView: View {
             NavigationStack {
                 Group {
                     if isLoadingChildren {
-                        ProgressView("Loading...")
+                        VStack(spacing: .ekoSpacingSM) {
+                            ProgressView()
+                                .scaleEffect(1.2)
+                            Text("Loading...")
+                                .font(.ekoCaption)
+                                .foregroundStyle(Color.ekoSecondaryLabel)
+                        }
                     } else if let error {
                         ErrorView(error: error) {
                             Task {
@@ -114,9 +121,9 @@ struct ContentView: View {
             } label: {
                 HStack(spacing: 4) {
                     Text(selectedChild?.name ?? "Select Child")
-                        .font(.headline)
+                        .font(.ekoHeadline)
                     Image(systemName: "chevron.down")
-                        .font(.caption)
+                        .font(.ekoCaption)
                 }
             }
         }
@@ -161,8 +168,9 @@ struct HomeView: View {
                     .font(.system(size: 60))
                     .foregroundStyle(.secondary)
                 Text("Home")
-                    .font(.title)
+                    .font(.ekoTitle1)
                 Text("Your parenting dashboard")
+                    .font(.ekoBody)
                     .foregroundStyle(.secondary)
             }
             .navigationTitle("Home")
@@ -178,8 +186,9 @@ struct LibraryView: View {
                     .font(.system(size: 60))
                     .foregroundStyle(.secondary)
                 Text("Library")
-                    .font(.title)
+                    .font(.ekoTitle1)
                 Text("Educational content & resources")
+                    .font(.ekoBody)
                     .foregroundStyle(.secondary)
             }
             .navigationTitle("Library")
@@ -200,19 +209,24 @@ struct ProfileView: View {
                 // Children Section
                 Section {
                     if isLoading {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                            Spacer()
+                        }
+                        .padding(.vertical, .ekoSpacingLG)
                     } else if children.isEmpty {
                         Text("No children added yet")
+                            .font(.ekoBody)
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(children) { child in
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(child.name)
-                                        .font(.headline)
+                                        .font(.ekoHeadline)
                                     Text("Age \(child.age) • \(child.temperament.displayName)")
-                                        .font(.caption)
+                                        .font(.ekoCaption)
                                         .foregroundStyle(.secondary)
                                 }
                                 Spacer()
@@ -225,21 +239,28 @@ struct ProfileView: View {
                         showAddChild = true
                     } label: {
                         Label("Add Child", systemImage: "plus.circle.fill")
+                            .font(.ekoBody)
                     }
                 } header: {
                     Text("Children")
+                        .font(.ekoHeadline)
                 } footer: {
                     Text("Add child profiles to personalize Lyra's guidance")
+                        .font(.ekoCaption)
                 }
 
                 // Account Section
-                Section("Account") {
+                Section {
                     Button("Sign Out") {
                         Task {
                             try? await supabase.signOut()
                         }
                     }
+                    .font(.ekoBody)
                     .foregroundStyle(.red)
+                } header: {
+                    Text("Account")
+                        .font(.ekoHeadline)
                 }
             }
             .navigationTitle("Profile")
@@ -301,10 +322,10 @@ struct ChildSelectionView: View {
                 .foregroundStyle(.secondary)
 
             Text("Select a Child")
-                .font(.title)
+                .font(.ekoTitle1)
 
             Text("Choose which child you'd like to chat with Lyra about")
-                .font(.body)
+                .font(.ekoBody)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
@@ -317,9 +338,9 @@ struct ChildSelectionView: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(child.name)
-                                    .font(.headline)
+                                    .font(.ekoHeadline)
                                 Text("Age \(child.age) • \(child.temperament.displayName)")
-                                    .font(.caption)
+                                    .font(.ekoCaption)
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
@@ -352,10 +373,10 @@ struct NoChildrenView: View {
                 .foregroundStyle(.secondary)
 
             Text("No Children Added")
-                .font(.title)
+                .font(.ekoTitle1)
 
             Text("Add a child profile to start using Lyra")
-                .font(.body)
+                .font(.ekoBody)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
@@ -387,10 +408,10 @@ struct ErrorView: View {
                 .foregroundStyle(.red)
 
             Text("Something went wrong")
-                .font(.title)
+                .font(.ekoTitle1)
 
             Text(error.localizedDescription)
-                .font(.body)
+                .font(.ekoBody)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)

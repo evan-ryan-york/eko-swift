@@ -8,6 +8,7 @@ final class LyraViewModel {
     // MARK: - Text Chat State
     var messages: [Message] = []
     var isLoading = false
+    var isInitialLoading = false
     var error: Error?
 
     // MARK: - Voice State
@@ -130,6 +131,9 @@ final class LyraViewModel {
 
     // MARK: - Conversation Management
     func loadActiveConversation() async {
+        isInitialLoading = true
+        defer { isInitialLoading = false }
+
         do {
             if let conversation = try await supabase.getActiveConversation(childId: childId) {
                 conversationId = conversation.id

@@ -14,80 +14,94 @@ struct LyraView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // Voice mode banner (transcripts now show in main chat)
-                if viewModel.isVoiceMode {
-                    VoiceBannerView(
-                        status: viewModel.voiceStatus,
-                        onEnd: {
-                            Task {
-                                await viewModel.endVoiceMode()
-                            }
-                        }
-                    )
-                    .transition(.move(edge: .top))
-                }
-
-                // Message list
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: .ekoSpacingMD) {
-                            if viewModel.messages.isEmpty {
-                                // Empty state
-                                emptyStateView
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            } else {
-                                ForEach(viewModel.messages) { message in
-                                    MessageBubbleView(message: message)
-                                        .id(message.id)
-                                }
-
-                                // Typing indicator
-                                if viewModel.isLoading {
-                                    HStack {
-                                        TypingIndicatorView()
-                                        Spacer()
+            Group {
+                if viewModel.isInitialLoading {
+                    // Show loading spinner during initial conversation fetch
+                    VStack {
+                        ProgressView()
+                            .scaleEffect(1.2)
+                        Text("Loading conversation...")
+                            .font(.ekoCaption)
+                            .foregroundStyle(Color.ekoSecondaryLabel)
+                            .padding(.top, .ekoSpacingSM)
+                    }
+                } else {
+                    VStack(spacing: 0) {
+                        // Voice mode banner (transcripts now show in main chat)
+                        if viewModel.isVoiceMode {
+                            VoiceBannerView(
+                                status: viewModel.voiceStatus,
+                                onEnd: {
+                                    Task {
+                                        await viewModel.endVoiceMode()
                                     }
-                                    .padding(.horizontal)
+                                }
+                            )
+                            .transition(.move(edge: .top))
+                        }
+
+                        // Message list
+                        ScrollViewReader { proxy in
+                            ScrollView {
+                                LazyVStack(spacing: .ekoSpacingMD) {
+                                    if viewModel.messages.isEmpty {
+                                        // Empty state
+                                        emptyStateView
+                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    } else {
+                                        ForEach(viewModel.messages) { message in
+                                            MessageBubbleView(message: message)
+                                                .id(message.id)
+                                        }
+
+                                        // Typing indicator
+                                        if viewModel.isLoading {
+                                            HStack {
+                                                TypingIndicatorView()
+                                                Spacer()
+                                            }
+                                            .padding(.horizontal)
+                                        }
+                                    }
+                                }
+                                .padding()
+                            }
+                            .onChange(of: viewModel.messages.count) { _, _ in
+                                // Auto-scroll to latest message
+                                if let lastMessage = viewModel.messages.last {
+                                    withAnimation {
+                                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                                    }
                                 }
                             }
                         }
-                        .padding()
-                    }
-                    .onChange(of: viewModel.messages.count) { _, _ in
-                        // Auto-scroll to latest message
-                        if let lastMessage = viewModel.messages.last {
-                            withAnimation {
-                                proxy.scrollTo(lastMessage.id, anchor: .bottom)
-                            }
-                        }
-                    }
-                }
 
-                Divider()
+                        Divider()
 
-                // Input bar (hidden during voice mode)
-                if !viewModel.isVoiceMode {
-                    ChatInputBar(
-                        text: $inputText,
-                        isLoading: viewModel.isLoading,
-                        onSend: {
-                            Task {
-                                let messageText = inputText
-                                inputText = ""
-                                do {
-                                    try await viewModel.sendMessage(messageText)
-                                } catch {
-                                    print("Error sending message: \(error)")
+                        // Input bar (hidden during voice mode)
+                        if !viewModel.isVoiceMode {
+                            ChatInputBar(
+                                text: $inputText,
+                                isLoading: viewModel.isLoading,
+                                onSend: {
+                                    Task {
+                                        let messageText = inputText
+                                        inputText = ""
+                                        do {
+                                            try await viewModel.sendMessage(messageText)
+                                        } catch {
+                                            print("Error sending message: \(error)")
+                                        }
+                                    }
+                                },
+                                onVoiceTap: {
+                                    Task {
+                                        await viewModel.startVoiceMode()
+                                    }
                                 }
-                            }
-                        },
-                        onVoiceTap: {
-                            Task {
-                                await viewModel.startVoiceMode()
-                            }
+                            )
                         }
-                    )
+                    }
                 }
             }
             .navigationTitle("Chat with Lyra")

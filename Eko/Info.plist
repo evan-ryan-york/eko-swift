@@ -19,5 +19,10 @@
 	<string>Lyra needs microphone access for voice conversations with your AI parenting coach.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Lyra uses speech recognition to transcribe your voice conversations.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Urbanist-VariableFont_wght.ttf</string>
+		<string>Urbanist-Italic-VariableFont_wght.ttf</string>
+	</array>
 </dict>
 </plist>

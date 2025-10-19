@@ -12,7 +12,7 @@ Your task is to analyze the results of the following pre-commit checks for the E
 This command builds the Eko project to ensure there are no compilation errors.
 
 **Build Output:**
-!`xcodebuild -project Eko.xcodeproj -scheme Eko -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.2' build 2>&1 | grep -E "error:|warning:|BUILD SUCCEEDED|BUILD FAILED" | head -20`
+!`xcodebuild -project Eko.xcodeproj -scheme Eko -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max' build 2>&1 | grep -E "error:|warning:|BUILD SUCCEEDED|BUILD FAILED" | head -20`
 
 ## 2. TypeScript Syntax Check
 
