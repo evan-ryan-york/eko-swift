@@ -413,16 +413,28 @@ extension RealtimeVoiceService: RTCDataChannelDelegate {
     nonisolated func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
         guard let json = try? JSONSerialization.jsonObject(with: buffer.data) as? [String: Any],
               let eventType = json["type"] as? String else {
+            print("❌ [Voice] Failed to parse event JSON")
             return
+        }
+
+        // Log all events for debugging
+        if let jsonData = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            print("📨 [Voice] Received event: \(eventType)")
+            print("📨 [Voice] Full JSON:\n\(jsonString)")
         }
 
         Task { @MainActor in
             switch eventType {
             // GA API event names
             case "conversation.item.input_audio_transcription.completed":
+                print("🎯 [Voice] Matched user transcription event")
                 if let transcript = json["transcript"] as? String {
                     print("📝 [Voice] User transcript: \(transcript)")
                     onUserTranscriptCompleted?(transcript)
+                } else {
+                    print("⚠️ [Voice] User transcript event received but no transcript field found")
+                    print("⚠️ [Voice] JSON keys: \(json.keys)")
                 }
 
             case "response.output_audio_transcript.delta":
