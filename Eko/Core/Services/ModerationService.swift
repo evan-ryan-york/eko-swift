@@ -1,7 +1,7 @@
 import Foundation
 
 // MARK: - Moderation Service
-final class ModerationService {
+final class ModerationService: Sendable {
     static let shared = ModerationService()
 
     private let crisisKeywords = [

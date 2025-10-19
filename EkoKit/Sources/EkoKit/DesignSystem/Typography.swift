@@ -3,26 +3,26 @@ import SwiftUI
 // MARK: - Typography
 public extension Font {
     // Display styles (largest)
-    static let ekoDisplay = Font.system(size: 34, weight: .bold, design: .rounded)
+    static let ekoDisplay = Font.custom("Urbanist", size: 34).weight(.bold)
 
     // Title styles
-    static let ekoTitle1 = Font.system(size: 28, weight: .bold, design: .rounded)
-    static let ekoTitle2 = Font.system(size: 22, weight: .bold, design: .rounded)
-    static let ekoTitle3 = Font.system(size: 20, weight: .semibold, design: .rounded)
+    static let ekoTitle1 = Font.custom("Urbanist", size: 28).weight(.bold)
+    static let ekoTitle2 = Font.custom("Urbanist", size: 22).weight(.bold)
+    static let ekoTitle3 = Font.custom("Urbanist", size: 20).weight(.semibold)
 
     // Headline and Body
-    static let ekoHeadline = Font.system(size: 17, weight: .semibold, design: .rounded)
-    static let ekoBody = Font.system(size: 17, weight: .regular, design: .default)
-    static let ekoBodyEmphasized = Font.system(size: 17, weight: .semibold, design: .default)
+    static let ekoHeadline = Font.custom("Urbanist", size: 17).weight(.semibold)
+    static let ekoBody = Font.custom("Urbanist", size: 17).weight(.regular)
+    static let ekoBodyEmphasized = Font.custom("Urbanist", size: 17).weight(.semibold)
 
     // Subheadline and Callout
-    static let ekoSubheadline = Font.system(size: 15, weight: .regular, design: .default)
-    static let ekoCallout = Font.system(size: 16, weight: .regular, design: .default)
+    static let ekoSubheadline = Font.custom("Urbanist", size: 15).weight(.regular)
+    static let ekoCallout = Font.custom("Urbanist", size: 16).weight(.regular)
 
     // Footnote and Caption
-    static let ekoFootnote = Font.system(size: 13, weight: .regular, design: .default)
-    static let ekoCaption = Font.system(size: 12, weight: .regular, design: .default)
-    static let ekoCaption2 = Font.system(size: 11, weight: .regular, design: .default)
+    static let ekoFootnote = Font.custom("Urbanist", size: 13).weight(.regular)
+    static let ekoCaption = Font.custom("Urbanist", size: 12).weight(.regular)
+    static let ekoCaption2 = Font.custom("Urbanist", size: 11).weight(.regular)
 }
 
 // Text style modifiers for convenience
