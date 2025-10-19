@@ -21,8 +21,8 @@
 	<string>Lyra uses speech recognition to transcribe your voice conversations.</string>
 	<key>UIAppFonts</key>
 	<array>
-		<string>Assets/Fonts/Urbanist-VariableFont_wght.ttf</string>
-		<string>Assets/Fonts/Urbanist-Italic-VariableFont_wght.ttf</string>
+		<string>Urbanist-VariableFont_wght.ttf</string>
+		<string>Urbanist-Italic-VariableFont_wght.ttf</string>
 	</array>
 </dict>
 </plist>
