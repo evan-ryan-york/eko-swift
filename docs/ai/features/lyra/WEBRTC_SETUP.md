@@ -1,7 +1,8 @@
 # WebRTC Setup Guide for Lyra Voice Mode
 
 **Created:** October 12, 2025
-**Status:** Manual Setup Required
+**Updated:** October 19, 2025 (GA API Migration Complete)
+**Status:** ✅ Working with GA API
 **Issue:** stasel/WebRTC Swift Package has SPM dependency resolution failures
 
 ---
@@ -19,13 +20,15 @@ This prevents automatic installation via SPM in Xcode.
 
 ## Current Status
 
-✅ **Phase 3 Implementation COMPLETE:**
+✅ **Phase 3 Implementation COMPLETE & WORKING:**
 - RealtimeVoiceService fully implemented with GA API
-- Ephemeral key connection flow complete
+- Ephemeral key connection flow complete and tested
 - RTCPeerConnectionDelegate implemented
-- RTCDataChannelDelegate with correct event names
+- RTCDataChannelDelegate with correct GA event names
 - Timeout handling added
 - Conditional compilation (#if canImport(WebRTC))
+- **OpenAI GA API migration complete (Oct 19, 2025)**
+- **Successfully connects and streams voice**
 
 ⚠️ **WebRTC Package Installation:**
 - Package reference exists in project
@@ -128,17 +131,18 @@ The `RealtimeVoiceService.swift` is **fully implemented** with:
 - SDP offer/answer negotiation
 - Audio track management
 - Data channel for transcription events
-- Proper event handling:
+- Proper event handling (GA API event names):
   - `conversation.item.input_audio_transcription.completed`
-  - `response.audio_transcript.delta`
-  - `response.audio_transcript.done`
+  - `response.output_audio_transcript.delta` ✅ (Updated for GA)
+  - `response.output_audio_transcript.done` ✅ (Updated for GA)
   - `response.done`
   - `error`
 - Microphone permissions
 - Audio session configuration
-- Connection timeout (15 seconds)
+- Connection timeout handling
 - Interrupt functionality
 - Proper cleanup on session end
+- Comprehensive logging for debugging
 
 ### ✅ Swift 6 Compliance:
 - `@MainActor` annotation
@@ -278,13 +282,53 @@ The code is production-ready. The only remaining step is resolving the WebRTC fr
 
 ---
 
+## OpenAI GA API Migration (October 19, 2025)
+
+### Issues Discovered & Fixed:
+
+The original implementation was using OpenAI's **beta Realtime API**. During testing, we discovered and fixed the following:
+
+#### Edge Function Changes:
+1. **Endpoint**: `/v1/realtime/sessions` → `/v1/realtime/client_secrets`
+2. **Request Format**: Must wrap config in `session` object:
+   ```typescript
+   // Before (Beta):
+   { model: 'gpt-realtime', voice: 'alloy' }
+
+   // After (GA):
+   { session: { type: 'realtime', model: 'gpt-realtime', audio: { output: { voice: 'alloy' }}}}
+   ```
+3. **Response Parsing**: `openaiResponse.clientSecret.value` → `openaiResponse.value`
+
+#### iOS Changes:
+1. **WebRTC SDP Endpoint**: `/v1/realtime` → `/v1/realtime/calls`
+2. **HTTP Status Handling**: Accept 2xx range (OpenAI returns 201 Created, not 200)
+3. **Event Names**:
+   - `response.audio_transcript.delta` → `response.output_audio_transcript.delta`
+   - `response.audio_transcript.done` → `response.output_audio_transcript.done`
+4. **Added comprehensive logging** for debugging WebRTC connections
+
+### Deployment:
+- Edge Function deployed to Supabase ✅
+- iOS implementation updated ✅
+- Voice mode tested and working ✅
+
+---
+
 ## Next Steps
 
-### To Complete Voice Mode:
+### Voice Mode (Already Working):
+
+1. ✅ **OpenAI GA API migration complete**
+2. ✅ **Edge Function deployed**
+3. ✅ **iOS implementation working**
+4. **Ready for production use**
+
+### Optional: Optimize WebRTC Setup
 
 1. **Choose installation method** (Option 1 recommended)
 2. **Remove SPM package reference** from Xcode
-3. **Install WebRTC framework** manually
+3. **Install WebRTC framework** manually (if not already done)
 4. **Build & test** on physical device
 5. **Deploy to TestFlight** or App Store
 
@@ -296,6 +340,6 @@ The code is production-ready. The only remaining step is resolving the WebRTC fr
 
 ---
 
-**Last Updated:** October 12, 2025
+**Last Updated:** October 19, 2025
 **Author:** Claude Code
-**Status:** Implementation complete, awaiting WebRTC framework installation
+**Status:** ✅ Voice mode working with GA API
