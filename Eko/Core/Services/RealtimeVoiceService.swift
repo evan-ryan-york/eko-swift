@@ -320,8 +320,6 @@ final class RealtimeVoiceService: NSObject {
         peerConnection = nil
         #endif
         status = .disconnected
-        userTranscript = ""
-        aiTranscript = ""
     }
 
     // MARK: - Audio Configuration
