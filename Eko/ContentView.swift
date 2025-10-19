@@ -38,7 +38,13 @@ struct ContentView: View {
             NavigationStack {
                 Group {
                     if isLoadingChildren {
-                        ProgressView("Loading...")
+                        VStack(spacing: .ekoSpacingSM) {
+                            ProgressView()
+                                .scaleEffect(1.2)
+                            Text("Loading...")
+                                .font(.ekoCaption)
+                                .foregroundStyle(Color.ekoSecondaryLabel)
+                        }
                     } else if let error {
                         ErrorView(error: error) {
                             Task {
@@ -203,8 +209,12 @@ struct ProfileView: View {
                 // Children Section
                 Section {
                     if isLoading {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                            Spacer()
+                        }
+                        .padding(.vertical, .ekoSpacingLG)
                     } else if children.isEmpty {
                         Text("No children added yet")
                             .font(.ekoBody)

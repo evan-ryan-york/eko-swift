@@ -14,7 +14,13 @@ struct ChatHistorySheet: View {
         NavigationStack {
             Group {
                 if isLoading {
-                    ProgressView("Loading history...")
+                    VStack(spacing: .ekoSpacingSM) {
+                        ProgressView()
+                            .scaleEffect(1.2)
+                        Text("Loading history...")
+                            .font(.ekoCaption)
+                            .foregroundStyle(Color.ekoSecondaryLabel)
+                    }
                 } else if conversations.isEmpty {
                     emptyStateView
                 } else {
@@ -113,7 +119,14 @@ struct ConversationDetailView: View {
         ScrollView {
             LazyVStack(spacing: .ekoSpacingMD) {
                 if isLoading {
-                    ProgressView()
+                    VStack(spacing: .ekoSpacingSM) {
+                        ProgressView()
+                            .scaleEffect(1.2)
+                        Text("Loading messages...")
+                            .font(.ekoCaption)
+                            .foregroundStyle(Color.ekoSecondaryLabel)
+                    }
+                    .padding(.ekoSpacingXL)
                 } else if messages.isEmpty {
                     Text("No messages found")
                         .foregroundStyle(Color.ekoSecondaryLabel)
