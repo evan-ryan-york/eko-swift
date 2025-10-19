@@ -48,8 +48,11 @@ final class RealtimeVoiceService: NSObject {
     }
 
     var status: Status = .disconnected
-    var userTranscript: String = ""
-    var aiTranscript: String = ""
+
+    // MARK: - Transcript Callbacks
+    var onUserTranscriptCompleted: ((String) -> Void)?
+    var onAITranscriptDelta: ((String) -> Void)?
+    var onAITranscriptDone: (() -> Void)?
 
     // MARK: - WebRTC Components
     #if canImport(WebRTC)
@@ -72,7 +75,7 @@ final class RealtimeVoiceService: NSObject {
     }
 
     // MARK: - Session Management
-    func startSession(conversationId: UUID, childId: UUID) async throws {
+    func startSession(conversationId: UUID, childId: UUID, previousMessages: [Message] = []) async throws {
         #if canImport(WebRTC)
         status = .connecting
 
@@ -166,7 +169,10 @@ final class RealtimeVoiceService: NSObject {
                 self.status = .connected
             }
 
-            // 10. Send session configuration via data channel
+            // 10. Send conversation history for context
+            try await self.sendConversationHistory(previousMessages)
+
+            // 11. Send session configuration via data channel
             try await self.configureSession()
         } catch {
             await MainActor.run {
@@ -250,6 +256,48 @@ final class RealtimeVoiceService: NSObject {
             dataChannel?.sendData(buffer)
             print("📤 Sent session.update configuration")
         }
+        #endif
+    }
+
+    func sendConversationHistory(_ messages: [Message]) async throws {
+        #if canImport(WebRTC)
+        // Send conversation history to OpenAI for context
+        // Limit to last 20 messages to avoid token limits
+        let recentMessages = Array(messages.suffix(20))
+
+        guard !recentMessages.isEmpty else {
+            print("📜 [Voice] No conversation history to send")
+            return
+        }
+
+        print("📜 [Voice] Sending \(recentMessages.count) messages for context")
+
+        for message in recentMessages {
+            // Create conversation.item.create event for each message
+            let conversationItem: [String: Any] = [
+                "type": "conversation.item.create",
+                "item": [
+                    "type": "message",
+                    "role": message.role.rawValue,
+                    "content": [
+                        [
+                            "type": "input_text",
+                            "text": message.content
+                        ]
+                    ]
+                ]
+            ]
+
+            if let data = try? JSONSerialization.data(withJSONObject: conversationItem) {
+                let buffer = RTCDataBuffer(data: data, isBinary: false)
+                dataChannel?.sendData(buffer)
+            }
+
+            // Small delay to avoid overwhelming the data channel
+            try await Task.sleep(nanoseconds: 10_000_000) // 10ms
+        }
+
+        print("✅ [Voice] Conversation history sent")
         #endif
     }
 
@@ -375,21 +423,23 @@ extension RealtimeVoiceService: RTCDataChannelDelegate {
             // GA API event names
             case "conversation.item.input_audio_transcription.completed":
                 if let transcript = json["transcript"] as? String {
-                    userTranscript = transcript
+                    print("📝 [Voice] User transcript: \(transcript)")
+                    onUserTranscriptCompleted?(transcript)
                 }
 
             case "response.output_audio_transcript.delta":
                 if let delta = json["delta"] as? String {
-                    aiTranscript += delta
+                    onAITranscriptDelta?(delta)
                 }
 
             case "response.output_audio_transcript.done":
                 // AI finished speaking
-                print("AI transcript complete: \(aiTranscript)")
+                print("✅ [Voice] AI transcript complete")
+                onAITranscriptDone?()
 
             case "response.done":
                 // Full response complete
-                print("Response complete")
+                print("✅ [Voice] Response complete")
 
             case "error":
                 if let errorDict = json["error"] as? [String: Any],

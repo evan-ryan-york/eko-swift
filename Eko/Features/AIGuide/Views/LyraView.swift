@@ -15,12 +15,10 @@ struct LyraView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Voice mode banner
+                // Voice mode banner (transcripts now show in main chat)
                 if viewModel.isVoiceMode {
                     VoiceBannerView(
                         status: viewModel.voiceStatus,
-                        userTranscript: viewModel.userTranscript,
-                        aiTranscript: viewModel.aiTranscript,
                         onInterrupt: { viewModel.interruptAI() },
                         onEnd: { viewModel.endVoiceMode() }
                     )
