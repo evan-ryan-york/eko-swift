@@ -230,24 +230,29 @@ final class RealtimeVoiceService: NSObject {
         // Wait a moment for data channel to be fully ready
         try await Task.sleep(nanoseconds: 100_000_000) // 100ms
 
-        // Send session.update event to configure the session
+        // Send session.update event to configure the session (GA API format)
         let sessionConfig: [String: Any] = [
             "type": "session.update",
             "session": [
-                "modalities": ["audio", "text"],
+                "type": "realtime",
+                "model": "gpt-realtime",
                 "instructions": "You are Lyra, an empathetic AI parenting coach. Speak naturally, warmly, and conversationally. Keep responses brief (2-4 sentences) to maintain natural dialogue flow.",
-                "voice": "alloy",
-                "input_audio_format": "pcm16",
-                "output_audio_format": "pcm16",
-                "input_audio_transcription": [
-                    "model": "whisper-1"
-                ],
-                "turn_detection": [
-                    "type": "server_vad",
-                    "threshold": 0.5,
-                    "prefix_padding_ms": 300,
-                    "silence_duration_ms": 500
-                ]
+                "audio": [
+                    "input": [
+                        "transcription": [
+                            "model": "whisper-1"
+                        ],
+                        "turn_detection": [
+                            "type": "server_vad",
+                            "threshold": 0.5,
+                            "prefix_padding_ms": 300,
+                            "silence_duration_ms": 500
+                        ]
+                    ] as [String: Any],
+                    "output": [
+                        "voice": "alloy"
+                    ]
+                ] as [String: Any]
             ] as [String: Any]
         ]
 
@@ -413,28 +418,16 @@ extension RealtimeVoiceService: RTCDataChannelDelegate {
     nonisolated func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
         guard let json = try? JSONSerialization.jsonObject(with: buffer.data) as? [String: Any],
               let eventType = json["type"] as? String else {
-            print("❌ [Voice] Failed to parse event JSON")
             return
-        }
-
-        // Log all events for debugging
-        if let jsonData = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted),
-           let jsonString = String(data: jsonData, encoding: .utf8) {
-            print("📨 [Voice] Received event: \(eventType)")
-            print("📨 [Voice] Full JSON:\n\(jsonString)")
         }
 
         Task { @MainActor in
             switch eventType {
             // GA API event names
             case "conversation.item.input_audio_transcription.completed":
-                print("🎯 [Voice] Matched user transcription event")
                 if let transcript = json["transcript"] as? String {
-                    print("📝 [Voice] User transcript: \(transcript)")
+                    print("📝 [Voice] User: \(transcript)")
                     onUserTranscriptCompleted?(transcript)
-                } else {
-                    print("⚠️ [Voice] User transcript event received but no transcript field found")
-                    print("⚠️ [Voice] JSON keys: \(json.keys)")
                 }
 
             case "response.output_audio_transcript.delta":
@@ -444,21 +437,22 @@ extension RealtimeVoiceService: RTCDataChannelDelegate {
 
             case "response.output_audio_transcript.done":
                 // AI finished speaking
-                print("✅ [Voice] AI transcript complete")
                 onAITranscriptDone?()
 
             case "response.done":
                 // Full response complete
-                print("✅ [Voice] Response complete")
+                break
 
             case "error":
                 if let errorDict = json["error"] as? [String: Any],
                    let message = errorDict["message"] as? String {
+                    print("❌ [Voice] Error: \(message)")
                     status = .error(VoiceError.realtimeError(message))
                 }
 
             default:
-                print("Unhandled event type: \(eventType)")
+                // Ignore other event types
+                break
             }
         }
     }
