@@ -102,6 +102,8 @@ serve(async (req) => {
     const instructions = buildVoiceInstructions(child, memory)
 
     // Create ephemeral key using GA API
+    // The /v1/realtime/client_secrets endpoint creates an ephemeral token.
+    // Session configuration is sent in the request body.
     const keyResponse = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
       method: 'POST',
       headers: {
@@ -109,19 +111,12 @@ serve(async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-realtime',
-        voice: 'alloy',
-        instructions: instructions,
-        modalities: ['audio', 'text'],
-        temperature: 0.8,
-        turn_detection: {
-          type: 'server_vad',
-          threshold: 0.5,
-          prefix_padding_ms: 300,
-          silence_duration_ms: 500,
-        },
-        input_audio_transcription: {
-          model: 'whisper-1'
+        session: {
+          type: 'realtime',
+          model: 'gpt-realtime',
+          audio: {
+            output: { voice: 'alloy' }
+          }
         }
       }),
     })
@@ -135,10 +130,13 @@ serve(async (req) => {
       )
     }
 
-    const { client_secret } = await keyResponse.json()
+    const openaiResponse = await keyResponse.json()
+
+    // OpenAI GA API returns {value: "ek_..."} directly
+    const clientSecretValue = openaiResponse.value
 
     const response: RealtimeSessionResponse = {
-      clientSecret: client_secret,
+      clientSecret: clientSecretValue,
       model: 'gpt-realtime',
       voice: 'alloy'
     }

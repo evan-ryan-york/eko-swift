@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import EkoCore
 
 // MARK: - WebRTC Conditional Import
 // NOTE: WebRTC package has SPM dependency issues. See WEBRTC_SETUP.md for manual installation.
@@ -37,7 +38,7 @@ enum VoiceError: LocalizedError {
 // MARK: - Realtime Voice Service
 @MainActor
 @Observable
-final class RealtimeVoiceService {
+final class RealtimeVoiceService: NSObject {
     // MARK: - State
     enum Status {
         case disconnected
@@ -62,11 +63,12 @@ final class RealtimeVoiceService {
     private let supabase = SupabaseService.shared
 
     // MARK: - Initialization
-    init() {
+    override init() {
         #if canImport(WebRTC)
         RTCInitializeSSL()
         self.factory = RTCPeerConnectionFactory()
         #endif
+        super.init()
     }
 
     // MARK: - Session Management
@@ -74,22 +76,22 @@ final class RealtimeVoiceService {
         #if canImport(WebRTC)
         status = .connecting
 
-        // Add timeout wrapper
-        try await withTimeout(seconds: 15) {
+        // Start session without timeout for now (Swift 6 concurrency simplification)
+        do {
             // 1. Request microphone permission
-            let granted = await requestMicrophonePermission()
+            let granted = await self.requestMicrophonePermission()
             guard granted else {
                 await MainActor.run {
-                    status = .disconnected
+                    self.status = .disconnected
                 }
                 throw VoiceError.microphonePermissionDenied
             }
 
             // 2. Configure audio session
-            try configureAudioSession()
+            try self.configureAudioSession()
 
             // 3. Get ephemeral key from backend
-            let sessionResponse = try await supabase.createRealtimeSession(
+            let sessionResponse = try await self.supabase.createRealtimeSession(
                 conversationId: conversationId,
                 childId: childId
             )
@@ -106,14 +108,14 @@ final class RealtimeVoiceService {
             )
 
             await MainActor.run {
-                peerConnection = factory.peerConnection(
+                self.peerConnection = self.factory.peerConnection(
                     with: config,
                     constraints: constraints,
                     delegate: self
                 )
             }
 
-            guard let peerConnection = await MainActor.run(body: { self.peerConnection }) else {
+            guard let peerConnection = self.peerConnection else {
                 throw VoiceError.connectionFailed
             }
 
@@ -122,8 +124,8 @@ final class RealtimeVoiceService {
                 mandatoryConstraints: nil,
                 optionalConstraints: nil
             )
-            let audioSource = factory.audioSource(with: audioConstraints)
-            let audioTrack = factory.audioTrack(with: audioSource, trackId: "audio0")
+            let audioSource = self.factory.audioSource(with: audioConstraints)
+            let audioTrack = self.factory.audioTrack(with: audioSource, trackId: "audio0")
             peerConnection.add(audioTrack, streamIds: ["stream0"])
 
             await MainActor.run {
@@ -151,7 +153,7 @@ final class RealtimeVoiceService {
             try await peerConnection.setLocalDescription(offer)
 
             // 8. Connect to OpenAI using ephemeral key
-            let answerSdp = try await connectToOpenAI(
+            let answerSdp = try await self.connectToOpenAI(
                 offer: offer.sdp,
                 clientSecret: sessionResponse.clientSecret
             )
@@ -161,8 +163,16 @@ final class RealtimeVoiceService {
             try await peerConnection.setRemoteDescription(answer)
 
             await MainActor.run {
-                status = .connected
+                self.status = .connected
             }
+
+            // 10. Send session configuration via data channel
+            try await self.configureSession()
+        } catch {
+            await MainActor.run {
+                self.status = .error(error)
+            }
+            throw error
         }
         #else
         throw VoiceError.webRTCNotAvailable
@@ -170,8 +180,8 @@ final class RealtimeVoiceService {
     }
 
     private func connectToOpenAI(offer: String, clientSecret: String) async throws -> String {
-        // Make direct call to OpenAI Realtime API with SDP offer
-        guard let url = URL(string: "https://api.openai.com/v1/realtime") else {
+        // Make direct call to OpenAI Realtime API with SDP offer (GA endpoint)
+        guard let url = URL(string: "https://api.openai.com/v1/realtime/calls") else {
             throw VoiceError.connectionFailed
         }
 
@@ -181,18 +191,66 @@ final class RealtimeVoiceService {
         request.setValue("application/sdp", forHTTPHeaderField: "Content-Type")
         request.httpBody = offer.data(using: .utf8)
 
+        print("🌐 [WebRTC] Connecting to OpenAI /v1/realtime/calls")
+        print("🔑 [WebRTC] Using ephemeral key: \(clientSecret.prefix(20))...")
+
         let (data, response) = try await URLSession.shared.data(for: request)
 
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            print("❌ [WebRTC] Invalid HTTP response")
+            throw VoiceError.connectionFailed
+        }
+
+        print("📥 [WebRTC] OpenAI response status: \(httpResponse.statusCode)")
+
+        if !(200...299).contains(httpResponse.statusCode) {
+            let errorBody = String(data: data, encoding: .utf8) ?? "Unable to decode error body"
+            print("❌ [WebRTC] OpenAI error response: \(errorBody)")
+            print("❌ [WebRTC] Response headers: \(httpResponse.allHeaderFields)")
             throw VoiceError.connectionFailed
         }
 
         guard let answerSdp = String(data: data, encoding: .utf8) else {
+            print("❌ [WebRTC] Failed to decode SDP answer from OpenAI")
             throw VoiceError.connectionFailed
         }
 
+        print("✅ [WebRTC] Successfully received SDP answer from OpenAI")
         return answerSdp
+    }
+
+    private func configureSession() async throws {
+        #if canImport(WebRTC)
+        // Wait a moment for data channel to be fully ready
+        try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+
+        // Send session.update event to configure the session
+        let sessionConfig: [String: Any] = [
+            "type": "session.update",
+            "session": [
+                "modalities": ["audio", "text"],
+                "instructions": "You are Lyra, an empathetic AI parenting coach. Speak naturally, warmly, and conversationally. Keep responses brief (2-4 sentences) to maintain natural dialogue flow.",
+                "voice": "alloy",
+                "input_audio_format": "pcm16",
+                "output_audio_format": "pcm16",
+                "input_audio_transcription": [
+                    "model": "whisper-1"
+                ],
+                "turn_detection": [
+                    "type": "server_vad",
+                    "threshold": 0.5,
+                    "prefix_padding_ms": 300,
+                    "silence_duration_ms": 500
+                ]
+            ] as [String: Any]
+        ]
+
+        if let data = try? JSONSerialization.data(withJSONObject: sessionConfig) {
+            let buffer = RTCDataBuffer(data: data, isBinary: false)
+            dataChannel?.sendData(buffer)
+            print("📤 Sent session.update configuration")
+        }
+        #endif
     }
 
     func interrupt() {
@@ -234,9 +292,9 @@ final class RealtimeVoiceService {
     }
 
     // MARK: - Timeout Helper
-    private func withTimeout<T>(
+    private func withTimeout<T: Sendable>(
         seconds: TimeInterval,
-        operation: @escaping () async throws -> T
+        operation: @Sendable @escaping () async throws -> T
     ) async throws -> T {
         try await withThrowingTaskGroup(of: T.self) { group in
             group.addTask {
@@ -320,12 +378,12 @@ extension RealtimeVoiceService: RTCDataChannelDelegate {
                     userTranscript = transcript
                 }
 
-            case "response.audio_transcript.delta":
+            case "response.output_audio_transcript.delta":
                 if let delta = json["delta"] as? String {
                     aiTranscript += delta
                 }
 
-            case "response.audio_transcript.done":
+            case "response.output_audio_transcript.done":
                 // AI finished speaking
                 print("AI transcript complete: \(aiTranscript)")
 
