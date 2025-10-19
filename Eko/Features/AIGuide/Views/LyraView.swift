@@ -19,8 +19,11 @@ struct LyraView: View {
                 if viewModel.isVoiceMode {
                     VoiceBannerView(
                         status: viewModel.voiceStatus,
-                        onInterrupt: { viewModel.interruptAI() },
-                        onEnd: { viewModel.endVoiceMode() }
+                        onEnd: {
+                            Task {
+                                await viewModel.endVoiceMode()
+                            }
+                        }
                     )
                     .transition(.move(edge: .top))
                 }

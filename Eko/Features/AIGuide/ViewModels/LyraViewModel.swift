@@ -18,6 +18,12 @@ final class LyraViewModel {
     private var activeUserVoiceMessageId: UUID?
     private var activeAIVoiceMessageId: UUID?
 
+    // Map OpenAI item IDs to message UUIDs for updating transcripts
+    private var voiceItemIdToMessageId: [String: UUID] = [:]
+
+    // Track voice session start to know which messages to save
+    private var voiceSessionStartMessageCount: Int = 0
+
     var voiceStatus: RealtimeVoiceService.Status {
         voiceService.status
     }
@@ -37,11 +43,19 @@ final class LyraViewModel {
     }
 
     private func setupVoiceCallbacks() {
-        // Set up callbacks for real-time transcript integration
-        voiceService.onUserTranscriptCompleted = { [weak self] transcript in
+        // Called when user stops speaking (before transcript arrives)
+        voiceService.onUserAudioCommitted = { [weak self] itemId in
             guard let self else { return }
             Task { @MainActor in
-                self.handleUserTranscript(transcript)
+                self.handleUserAudioCommitted(itemId: itemId)
+            }
+        }
+
+        // Called when user's transcript is ready (update placeholder)
+        voiceService.onUserTranscriptCompleted = { [weak self] itemId, transcript in
+            guard let self else { return }
+            Task { @MainActor in
+                self.handleUserTranscriptCompleted(itemId: itemId, transcript: transcript)
             }
         }
 
@@ -61,17 +75,30 @@ final class LyraViewModel {
     }
 
     // MARK: - Voice Transcript Handlers
-    private func handleUserTranscript(_ transcript: String) {
-        // Create user message from voice input
+    private func handleUserAudioCommitted(itemId: String) {
+        // Create placeholder message when user stops speaking (before transcript arrives)
         let userMessage = Message(
             id: UUID(),
             conversationId: conversationId,
             role: .user,
-            content: transcript,
+            content: "...", // Placeholder until transcript arrives
             timestamp: Date()
         )
         messages.append(userMessage)
+        voiceItemIdToMessageId[itemId] = userMessage.id
         activeUserVoiceMessageId = userMessage.id
+    }
+
+    private func handleUserTranscriptCompleted(itemId: String, transcript: String) {
+        // Update placeholder message with actual transcript
+        guard let messageId = voiceItemIdToMessageId[itemId],
+              let index = messages.firstIndex(where: { $0.id == messageId }) else {
+            print("⚠️ [ViewModel] Could not find message for item \(itemId)")
+            return
+        }
+
+        messages[index].content = transcript
+        voiceItemIdToMessageId.removeValue(forKey: itemId)
     }
 
     private func handleAITranscriptDelta(_ delta: String) {
@@ -204,6 +231,9 @@ final class LyraViewModel {
         do {
             isVoiceMode = true
 
+            // Track starting message count to know which messages to save later
+            voiceSessionStartMessageCount = messages.count
+
             // Create conversation if needed
             if conversationId == nil {
                 let conversation = try await supabase.createConversation(childId: childId)
@@ -226,20 +256,29 @@ final class LyraViewModel {
         }
     }
 
-    func endVoiceMode() {
+    func endVoiceMode() async {
         voiceService.endSession()
         isVoiceMode = false
+
+        // Save new voice messages to database
+        let newMessages = Array(messages.suffix(from: voiceSessionStartMessageCount))
+        if !newMessages.isEmpty {
+            do {
+                try await supabase.saveVoiceMessages(newMessages)
+                print("✅ [ViewModel] Saved \(newMessages.count) voice messages to database")
+            } catch {
+                print("❌ [ViewModel] Failed to save voice messages: \(error)")
+                self.error = error
+            }
+        }
 
         // Reset active voice message IDs
         activeUserVoiceMessageId = nil
         activeAIVoiceMessageId = nil
+        voiceItemIdToMessageId.removeAll()
+        voiceSessionStartMessageCount = 0
 
-        // Transcripts are already in messages array from real-time callbacks
-        print("🔚 [ViewModel] Voice mode ended, transcripts preserved in messages")
-    }
-
-    func interruptAI() {
-        voiceService.interrupt()
+        print("🔚 [ViewModel] Voice mode ended")
     }
 
     // MARK: - Conversation Completion

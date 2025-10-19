@@ -5,11 +5,10 @@ import EkoKit
 // Simplified banner - transcripts now appear in main chat
 struct VoiceBannerView: View {
     let status: RealtimeVoiceService.Status
-    let onInterrupt: () -> Void
     let onEnd: () -> Void
 
     var body: some View {
-        HStack {
+        HStack(spacing: .ekoSpacingMD) {
             Circle()
                 .fill(statusColor)
                 .frame(width: 8, height: 8)
@@ -20,17 +19,16 @@ struct VoiceBannerView: View {
 
             Spacer()
 
-            // Controls
-            Button(action: onInterrupt) {
-                Image(systemName: "hand.raised.fill")
-                    .foregroundStyle(Color.ekoSecondaryLabel)
-            }
-            .disabled(!isConnected)
-            .opacity(isConnected ? 1.0 : 0.5)
-
+            // Stop Voice Mode button
             Button(action: onEnd) {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(Color.ekoError)
+                Text("Stop Voice Mode")
+                    .font(.ekoFootnote)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, .ekoSpacingMD)
+                    .padding(.vertical, .ekoSpacingSM)
+                    .background(Color.ekoError)
+                    .cornerRadius(.ekoRadiusMD)
             }
         }
         .padding(.ekoSpacingMD)
@@ -81,7 +79,6 @@ struct VoiceBannerView: View {
 #Preview("Connecting") {
     VoiceBannerView(
         status: .connecting,
-        onInterrupt: {},
         onEnd: {}
     )
 }
@@ -89,7 +86,6 @@ struct VoiceBannerView: View {
 #Preview("Connected") {
     VoiceBannerView(
         status: .connected,
-        onInterrupt: {},
         onEnd: {}
     )
 }
@@ -97,7 +93,6 @@ struct VoiceBannerView: View {
 #Preview("Error State") {
     VoiceBannerView(
         status: .error(VoiceError.connectionFailed),
-        onInterrupt: {},
         onEnd: {}
     )
 }

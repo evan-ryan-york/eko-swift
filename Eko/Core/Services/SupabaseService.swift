@@ -292,6 +292,23 @@ final class SupabaseService: @unchecked Sendable {
             .value
     }
 
+    func saveVoiceMessages(_ messages: [Message]) async throws {
+        // Filter out placeholder messages and save to database
+        let messagesToSave = messages.filter { $0.content != "..." }
+
+        guard !messagesToSave.isEmpty else {
+            print("⚠️ [Supabase] No voice messages to save")
+            return
+        }
+
+        try await postgrestClient
+            .from("messages")
+            .insert(messagesToSave)
+            .execute()
+
+        print("✅ [Supabase] Saved \(messagesToSave.count) voice messages")
+    }
+
     func sendMessage(
         conversationId: UUID,
         message: String,

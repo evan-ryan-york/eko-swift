@@ -50,7 +50,8 @@ final class RealtimeVoiceService: NSObject {
     var status: Status = .disconnected
 
     // MARK: - Transcript Callbacks
-    var onUserTranscriptCompleted: ((String) -> Void)?
+    var onUserAudioCommitted: ((String) -> Void)? // Called when user stops speaking (before transcript)
+    var onUserTranscriptCompleted: ((String, String) -> Void)? // Called with (itemId, transcript)
     var onAITranscriptDelta: ((String) -> Void)?
     var onAITranscriptDone: (() -> Void)?
 
@@ -169,11 +170,10 @@ final class RealtimeVoiceService: NSObject {
                 self.status = .connected
             }
 
-            // 10. Send conversation history for context
-            try await self.sendConversationHistory(previousMessages)
-
-            // 11. Send session configuration via data channel
-            try await self.configureSession()
+            // Session is already configured by Edge Function, no need to update
+            // Send conversation history for context (disabled to prevent looping)
+            // TODO: Re-enable with proper response suppression
+            print("⚠️ [Voice] Connected - conversation history disabled to prevent response loop")
         } catch {
             await MainActor.run {
                 self.status = .error(error)
@@ -225,44 +225,6 @@ final class RealtimeVoiceService: NSObject {
         return answerSdp
     }
 
-    private func configureSession() async throws {
-        #if canImport(WebRTC)
-        // Wait a moment for data channel to be fully ready
-        try await Task.sleep(nanoseconds: 100_000_000) // 100ms
-
-        // Send session.update event to configure the session (GA API format)
-        let sessionConfig: [String: Any] = [
-            "type": "session.update",
-            "session": [
-                "type": "realtime",
-                "model": "gpt-realtime",
-                "instructions": "You are Lyra, an empathetic AI parenting coach. Speak naturally, warmly, and conversationally. Keep responses brief (2-4 sentences) to maintain natural dialogue flow.",
-                "audio": [
-                    "input": [
-                        "transcription": [
-                            "model": "whisper-1"
-                        ],
-                        "turn_detection": [
-                            "type": "server_vad",
-                            "threshold": 0.5,
-                            "prefix_padding_ms": 300,
-                            "silence_duration_ms": 500
-                        ]
-                    ] as [String: Any],
-                    "output": [
-                        "voice": "alloy"
-                    ]
-                ] as [String: Any]
-            ] as [String: Any]
-        ]
-
-        if let data = try? JSONSerialization.data(withJSONObject: sessionConfig) {
-            let buffer = RTCDataBuffer(data: data, isBinary: false)
-            dataChannel?.sendData(buffer)
-            print("📤 Sent session.update configuration")
-        }
-        #endif
-    }
 
     func sendConversationHistory(_ messages: [Message]) async throws {
         #if canImport(WebRTC)
@@ -330,8 +292,23 @@ final class RealtimeVoiceService: NSObject {
     // MARK: - Audio Configuration
     private func configureAudioSession() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker])
+
+        // Configure for voice chat with echo cancellation
+        // Note: Echo cancellation works best on real devices with headphones
+        // The simulator may pick up speaker output through the microphone
+        try session.setCategory(
+            .playAndRecord,
+            mode: .voiceChat,
+            options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP]
+        )
+
+        // Enable hardware voice processing for better echo cancellation
+        try session.setPreferredInputNumberOfChannels(1)
+        try session.setPreferredSampleRate(24000) // Match OpenAI's audio rate
+
         try session.setActive(true)
+
+        print("🎧 [Audio] Session configured with echo cancellation (mode: voiceChat)")
     }
 
     private func requestMicrophonePermission() async -> Bool {
@@ -423,26 +400,33 @@ extension RealtimeVoiceService: RTCDataChannelDelegate {
 
         Task { @MainActor in
             switch eventType {
-            // GA API event names
-            case "conversation.item.input_audio_transcription.completed":
-                if let transcript = json["transcript"] as? String {
-                    print("📝 [Voice] User: \(transcript)")
-                    onUserTranscriptCompleted?(transcript)
+            // User audio committed - create placeholder before transcription completes
+            case "input_audio_buffer.committed":
+                if let itemId = json["item_id"] as? String {
+                    print("🎤 [Voice] User audio committed (item: \(itemId))")
+                    onUserAudioCommitted?(itemId)
                 }
 
+            // User transcript completed - update placeholder with actual text
+            case "conversation.item.input_audio_transcription.completed":
+                if let itemId = json["item_id"] as? String,
+                   let transcript = json["transcript"] as? String {
+                    print("📝 [Voice] User transcript: \(transcript)")
+                    onUserTranscriptCompleted?(itemId, transcript)
+                } else {
+                    print("⚠️ [Voice] User transcript event missing data")
+                }
+
+            // AI response streaming
             case "response.output_audio_transcript.delta":
                 if let delta = json["delta"] as? String {
                     onAITranscriptDelta?(delta)
                 }
 
             case "response.output_audio_transcript.done":
-                // AI finished speaking
                 onAITranscriptDone?()
 
-            case "response.done":
-                // Full response complete
-                break
-
+            // Error handling
             case "error":
                 if let errorDict = json["error"] as? [String: Any],
                    let message = errorDict["message"] as? String {
@@ -450,8 +434,17 @@ extension RealtimeVoiceService: RTCDataChannelDelegate {
                     status = .error(VoiceError.realtimeError(message))
                 }
 
+            // Session confirmation
+            case "session.created", "session.updated":
+                if let session = json["session"] as? [String: Any],
+                   let audio = session["audio"] as? [String: Any],
+                   let input = audio["input"] as? [String: Any] {
+                    let hasTranscription = input["transcription"] != nil
+                    print("✅ [Voice] Session configured (transcription: \(hasTranscription ? "enabled" : "disabled"))")
+                }
+
             default:
-                // Ignore other event types
+                // Silently ignore other event types (response.created, conversation.item.added, etc.)
                 break
             }
         }
