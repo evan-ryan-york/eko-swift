@@ -6,6 +6,9 @@ public struct Child: Codable, Identifiable, Sendable {
     public let userId: UUID
     public var name: String
     public var age: Int
+    public var birthday: Date
+    public var goals: [String]
+    public var topics: [String]
     public var temperament: Temperament
     public var temperamentTalkative: Int
     public var temperamentSensitivity: Int
@@ -18,6 +21,9 @@ public struct Child: Codable, Identifiable, Sendable {
         userId: UUID,
         name: String,
         age: Int,
+        birthday: Date,
+        goals: [String] = [],
+        topics: [String] = [],
         temperament: Temperament,
         temperamentTalkative: Int = 5,
         temperamentSensitivity: Int = 5,
@@ -29,6 +35,9 @@ public struct Child: Codable, Identifiable, Sendable {
         self.userId = userId
         self.name = name
         self.age = age
+        self.birthday = birthday
+        self.goals = goals
+        self.topics = topics
         self.temperament = temperament
         self.temperamentTalkative = temperamentTalkative
         self.temperamentSensitivity = temperamentSensitivity
@@ -42,6 +51,9 @@ public struct Child: Codable, Identifiable, Sendable {
         case userId = "user_id"
         case name
         case age
+        case birthday
+        case goals
+        case topics
         case temperament
         case temperamentTalkative = "temperament_talkative"
         case temperamentSensitivity = "temperament_sensitivity"

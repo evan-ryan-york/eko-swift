@@ -1,9 +1,13 @@
 # Onboarding Implementation Plan
 
-**Version**: 1.0
-**Last Updated**: October 19, 2025
+**Version**: 1.1
+**Last Updated**: January 20, 2025
 **Feature**: User Onboarding Flow
 **Status**: Planning Phase
+
+> **📚 Related Documentation:**
+> - [Testing Strategy](/docs/ai/project-wide/testing-strategy.md) - Comprehensive testing approach for the entire app
+> - [Feature Details](/docs/ai/features/onboarding/feature-details.md) - Detailed onboarding specifications
 
 ---
 
@@ -16,6 +20,8 @@ This document provides a step-by-step implementation plan for building the Eko o
 3. Progress through the onboarding flow (7 steps)
 4. Resume onboarding if they log out or uninstall before completing
 5. Skip onboarding if already completed
+
+**Testing Approach**: This implementation follows the testing pyramid strategy with 50% unit tests, 30% integration tests, 15% UI tests, and 5% manual testing. See Phase 7 for detailed testing implementation.
 
 ---
 
@@ -98,15 +104,24 @@ COMMENT ON COLUMN user_profiles.current_child_id IS 'Temporary field tracking wh
 ALTER TABLE children
 ADD COLUMN IF NOT EXISTS birthday DATE,
 ADD COLUMN IF NOT EXISTS goals TEXT[] DEFAULT '{}',
-ADD COLUMN IF NOT EXISTS topics TEXT[] DEFAULT '{}';
+ADD COLUMN IF NOT EXISTS topics TEXT[] DEFAULT '{}',
+ADD COLUMN IF NOT EXISTS temperament_talkative INTEGER DEFAULT 5,
+ADD COLUMN IF NOT EXISTS temperament_sensitivity INTEGER DEFAULT 5,
+ADD COLUMN IF NOT EXISTS temperament_accountability INTEGER DEFAULT 5;
 
--- Add validation
+-- Add validation constraints
 ALTER TABLE children
-ADD CONSTRAINT valid_birthday CHECK (birthday <= CURRENT_DATE);
+ADD CONSTRAINT valid_birthday CHECK (birthday <= CURRENT_DATE),
+ADD CONSTRAINT valid_temperament_talkative CHECK (temperament_talkative BETWEEN 1 AND 10),
+ADD CONSTRAINT valid_temperament_sensitivity CHECK (temperament_sensitivity BETWEEN 1 AND 10),
+ADD CONSTRAINT valid_temperament_accountability CHECK (temperament_accountability BETWEEN 1 AND 10);
 
 COMMENT ON COLUMN children.birthday IS 'Child''s date of birth (ISO date)';
 COMMENT ON COLUMN children.goals IS 'Parent conversation goals (1-3 items from onboarding)';
 COMMENT ON COLUMN children.topics IS 'Selected conversation topic IDs (minimum 3 from onboarding)';
+COMMENT ON COLUMN children.temperament_talkative IS 'Communication style: 1 (Quiet) to 10 (Talkative)';
+COMMENT ON COLUMN children.temperament_sensitivity IS 'Emotional response: 1 (Argumentative) to 10 (Sensitive)';
+COMMENT ON COLUMN children.temperament_accountability IS 'Responsibility: 1 (Denial) to 10 (Accountable)';
 
 -- ============================================================================
 -- 3. Auto-create user_profile on signup (trigger function)
@@ -1107,71 +1122,898 @@ struct RootView: View {
 
 ---
 
-### **Phase 7: Testing & Edge Cases**
+### **Phase 7: Automated Testing**
 
-#### Step 7.1: Test Scenarios
+> **Reference**: See `/docs/ai/project-wide/testing-strategy.md` for comprehensive testing strategy
 
-**Scenario 1: New User**
-1. User signs in with Google (first time)
-2. Trigger creates `user_profiles` record with `NOT_STARTED`
-3. RootView detects incomplete onboarding
-4. User goes through all 7 steps
-5. State updates to `COMPLETE`
-6. RootView navigates to main app
-
-**Scenario 2: Incomplete Onboarding - Logout**
-1. User starts onboarding, reaches step 3 (GOALS)
-2. User logs out
-3. User logs back in
-4. RootView detects `onboardingState = GOALS`
-5. User resumes at GOALS step
-
-**Scenario 3: Incomplete Onboarding - App Reinstall**
-1. User starts onboarding, reaches step 5 (DISPOSITIONS)
-2. User uninstalls app
-3. User reinstalls and logs in
-4. RootView fetches profile from database
-5. User resumes at DISPOSITIONS step
-
-**Scenario 4: Multiple Children**
-1. User completes first child through DISPOSITIONS
-2. Reaches REVIEW, sees first child
-3. Taps "Add Another Child"
-4. Returns to CHILD_INFO with new `currentChildId`
-5. Completes second child
-6. Returns to REVIEW, sees both children
-7. Taps "Complete Setup"
-8. Onboarding state → COMPLETE
-
-**Scenario 5: Existing Users (Post-Migration)**
-1. Existing user logs in
-2. Backfill script already set them to `COMPLETE`
-3. RootView skips onboarding, goes to main app
-
-**Action Items:**
-- [ ] Test Scenario 1 (new user flow)
-- [ ] Test Scenario 2 (logout resume)
-- [ ] Test Scenario 3 (reinstall resume)
-- [ ] Test Scenario 4 (multiple children)
-- [ ] Test Scenario 5 (existing users)
+This phase implements automated tests following the testing pyramid: Unit Tests (50%) → Integration Tests (30%) → UI Tests (15%) → Manual Testing (5%).
 
 ---
 
-#### Step 7.2: Error Handling
+#### Step 7.1: Test Infrastructure Setup
 
-**Handle these error cases:**
+**Goal**: Create test targets and mock services
 
-1. **Network failure during save** → Show error alert, allow retry
-2. **Invalid data submission** → Show validation error, prevent navigation
-3. **Session expires mid-onboarding** → Redirect to auth, preserve state
-4. **Database constraint violation** → Show error message, log issue
-5. **Missing user_profile record** → Auto-create via fallback in `getUserProfile()`
+**File**: Create Xcode test targets
+
+1. **Create Unit Test Target**:
+   - File → New → Target → iOS Unit Testing Bundle
+   - Name: `EkoTests`
+   - Add to Eko project
+   - Link `EkoCore` framework to test target
+
+2. **Create Mock Services**:
+
+**File**: `/Eko/EkoTests/Mocks/MockSupabaseService.swift`
+
+```swift
+import Foundation
+import EkoCore
+@testable import Eko
+
+final class MockSupabaseService: SupabaseServiceProtocol {
+    // Control behavior
+    var shouldSucceed = true
+    var networkError: Error?
+
+    // Track calls
+    var updateDisplayNameCalled = false
+    var updateOnboardingStateCalled = false
+    var createChildCalled = false
+
+    // Mock data
+    var mockUserProfile: UserProfile?
+    var mockUser: User?
+    var mockChild: Child?
+    var mockChildren: [Child] = []
+
+    // MARK: - User Profile Methods
+
+    func getUserProfile() async throws -> UserProfile {
+        if let error = networkError { throw error }
+        guard shouldSucceed else { throw TestError.operationFailed }
+
+        return mockUserProfile ?? UserProfile(
+            id: UUID(),
+            onboardingState: .notStarted,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+    }
+
+    func updateOnboardingState(_ state: OnboardingState, currentChildId: UUID?) async throws {
+        updateOnboardingStateCalled = true
+        if let error = networkError { throw error }
+        guard shouldSucceed else { throw TestError.operationFailed }
+
+        mockUserProfile?.onboardingState = state
+        mockUserProfile?.currentChildId = currentChildId
+    }
+
+    func updateDisplayName(_ displayName: String) async throws {
+        updateDisplayNameCalled = true
+        if let error = networkError { throw error }
+        guard shouldSucceed else { throw TestError.operationFailed }
+
+        mockUser?.displayName = displayName
+    }
+
+    func getCurrentUserWithProfile() async throws -> User? {
+        if let error = networkError { throw error }
+        guard shouldSucceed else { throw TestError.operationFailed }
+        return mockUser
+    }
+
+    // MARK: - Child Methods
+
+    func createChild(
+        name: String,
+        age: Int,
+        birthday: Date,
+        goals: [String],
+        topics: [String],
+        temperament: Temperament,
+        temperamentTalkative: Int,
+        temperamentSensitivity: Int,
+        temperamentAccountability: Int
+    ) async throws -> Child {
+        createChildCalled = true
+        if let error = networkError { throw error }
+        guard shouldSucceed else { throw TestError.operationFailed }
+
+        let child = Child(
+            id: UUID(),
+            userId: mockUser?.id ?? UUID(),
+            name: name,
+            age: age,
+            birthday: birthday,
+            goals: goals,
+            topics: topics,
+            temperament: temperament,
+            temperamentTalkative: temperamentTalkative,
+            temperamentSensitivity: temperamentSensitivity,
+            temperamentAccountability: temperamentAccountability,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+
+        mockChild = child
+        mockChildren.append(child)
+        return child
+    }
+
+    func fetchChildren(forUserId userId: UUID) async throws -> [Child] {
+        if let error = networkError { throw error }
+        guard shouldSucceed else { throw TestError.operationFailed }
+        return mockChildren
+    }
+}
+
+enum TestError: Error {
+    case operationFailed
+}
+```
+
+3. **Create Test Fixtures**:
+
+**File**: `/Eko/EkoTests/Fixtures/TestFixtures.swift`
+
+```swift
+import Foundation
+import EkoCore
+
+enum TestFixtures {
+    static let testUserId = UUID()
+    static let testChildId = UUID()
+
+    static var testUser: User {
+        User(
+            id: testUserId,
+            email: "test@example.com",
+            createdAt: Date(),
+            updatedAt: Date(),
+            displayName: "Test Parent",
+            onboardingState: .notStarted
+        )
+    }
+
+    static var testChild: Child {
+        Child(
+            id: testChildId,
+            userId: testUserId,
+            name: "Test Child",
+            age: 10,
+            birthday: Calendar.current.date(byAdding: .year, value: -10, to: Date())!,
+            goals: ["Understanding their thoughts and feelings better"],
+            topics: ["emotions", "friends", "school"],
+            temperament: .easygoing,
+            temperamentTalkative: 7,
+            temperamentSensitivity: 5,
+            temperamentAccountability: 8,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+    }
+
+    static var testUserProfile: UserProfile {
+        UserProfile(
+            id: testUserId,
+            onboardingState: .notStarted,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+    }
+}
+```
 
 **Action Items:**
-- [ ] Add try-catch blocks around all database calls
-- [ ] Display user-friendly error messages
-- [ ] Add retry mechanisms for network failures
-- [ ] Test with airplane mode enabled
+- [ ] Create `EkoTests` target in Xcode
+- [ ] Create `MockSupabaseService.swift`
+- [ ] Create `TestFixtures.swift`
+- [ ] Verify test target builds successfully
+
+---
+
+#### Step 7.2: Unit Tests - OnboardingViewModel
+
+**Goal**: Test all business logic and validation rules (Target: 30 tests, 80%+ coverage)
+
+**File**: `/Eko/EkoTests/Features/Onboarding/OnboardingViewModelTests.swift`
+
+```swift
+import XCTest
+@testable import Eko
+import EkoCore
+
+@MainActor
+final class OnboardingViewModelTests: XCTestCase {
+
+    var sut: OnboardingViewModel!
+    var mockService: MockSupabaseService!
+
+    override func setUp() {
+        super.setUp()
+        mockService = MockSupabaseService()
+        sut = OnboardingViewModel(supabaseService: mockService)
+    }
+
+    override func tearDown() {
+        sut = nil
+        mockService = nil
+        super.tearDown()
+    }
+
+    // MARK: - User Info Validation Tests
+
+    func test_canProceedFromUserInfo_returnsFalse_whenNameIsEmpty() {
+        // Given
+        sut.parentName = ""
+
+        // When
+        let canProceed = sut.canProceedFromUserInfo
+
+        // Then
+        XCTAssertFalse(canProceed)
+    }
+
+    func test_canProceedFromUserInfo_returnsFalse_whenNameIsWhitespace() {
+        // Given
+        sut.parentName = "   "
+
+        // When
+        let canProceed = sut.canProceedFromUserInfo
+
+        // Then
+        XCTAssertFalse(canProceed)
+    }
+
+    func test_canProceedFromUserInfo_returnsTrue_whenNameIsValid() {
+        // Given
+        sut.parentName = "John Doe"
+
+        // When
+        let canProceed = sut.canProceedFromUserInfo
+
+        // Then
+        XCTAssertTrue(canProceed)
+    }
+
+    // MARK: - Child Info Validation Tests
+
+    func test_canProceedFromChildInfo_returnsFalse_whenNameIsEmpty() {
+        // Given
+        sut.childName = ""
+
+        // When
+        let canProceed = sut.canProceedFromChildInfo
+
+        // Then
+        XCTAssertFalse(canProceed)
+    }
+
+    func test_canProceedFromChildInfo_returnsTrue_whenNameIsValid() {
+        // Given
+        sut.childName = "Jane Doe"
+
+        // When
+        let canProceed = sut.canProceedFromChildInfo
+
+        // Then
+        XCTAssertTrue(canProceed)
+    }
+
+    // MARK: - Goals Validation Tests
+
+    func test_canProceedFromGoals_returnsFalse_whenNoGoalsSelected() {
+        // Given
+        sut.selectedGoals = []
+        sut.customGoal = ""
+
+        // When
+        let canProceed = sut.canProceedFromGoals
+
+        // Then
+        XCTAssertFalse(canProceed)
+    }
+
+    func test_canProceedFromGoals_returnsTrue_whenOneGoalSelected() {
+        // Given
+        sut.selectedGoals = ["Understanding their thoughts and feelings better"]
+
+        // When
+        let canProceed = sut.canProceedFromGoals
+
+        // Then
+        XCTAssertTrue(canProceed)
+    }
+
+    func test_canProceedFromGoals_returnsTrue_whenThreeGoalsSelected() {
+        // Given
+        sut.selectedGoals = [
+            "Understanding their thoughts and feelings better",
+            "Helping them navigate challenges",
+            "Connecting with them on a deeper level"
+        ]
+
+        // When
+        let canProceed = sut.canProceedFromGoals
+
+        // Then
+        XCTAssertTrue(canProceed)
+    }
+
+    func test_canProceedFromGoals_returnsFalse_whenMoreThanThreeGoalsSelected() {
+        // Given
+        sut.selectedGoals = [
+            "Understanding their thoughts and feelings better",
+            "Helping them navigate challenges",
+            "Connecting with them on a deeper level",
+            "Encouraging them to open up more"
+        ]
+
+        // When
+        let canProceed = sut.canProceedFromGoals
+
+        // Then
+        XCTAssertFalse(canProceed)
+    }
+
+    func test_canProceedFromGoals_returnsTrue_whenCustomGoalProvided() {
+        // Given
+        sut.selectedGoals = []
+        sut.customGoal = "Building trust"
+
+        // When
+        let canProceed = sut.canProceedFromGoals
+
+        // Then
+        XCTAssertTrue(canProceed)
+    }
+
+    // MARK: - Topics Validation Tests
+
+    func test_canProceedFromTopics_returnsFalse_whenLessThanThreeTopicsSelected() {
+        // Given
+        sut.selectedTopics = ["emotions", "friends"]
+
+        // When
+        let canProceed = sut.canProceedFromTopics
+
+        // Then
+        XCTAssertFalse(canProceed)
+    }
+
+    func test_canProceedFromTopics_returnsTrue_whenThreeTopicsSelected() {
+        // Given
+        sut.selectedTopics = ["emotions", "friends", "school"]
+
+        // When
+        let canProceed = sut.canProceedFromTopics
+
+        // Then
+        XCTAssertTrue(canProceed)
+    }
+
+    func test_canProceedFromTopics_returnsTrue_whenMoreThanThreeTopicsSelected() {
+        // Given
+        sut.selectedTopics = ["emotions", "friends", "school", "family", "conflict"]
+
+        // When
+        let canProceed = sut.canProceedFromTopics
+
+        // Then
+        XCTAssertTrue(canProceed)
+    }
+
+    // MARK: - State Transition Tests
+
+    func test_moveToNextStep_transitionsFromUserInfoToChildInfo() async {
+        // Given
+        sut.currentState = .userInfo
+        sut.parentName = "John Doe"
+        mockService.shouldSucceed = true
+
+        // When
+        await sut.moveToNextStep()
+
+        // Then
+        XCTAssertEqual(sut.currentState, .childInfo)
+        XCTAssertTrue(mockService.updateDisplayNameCalled)
+    }
+
+    func test_moveToNextStep_transitionsFromChildInfoToGoals() async {
+        // Given
+        sut.currentState = .childInfo
+        mockService.shouldSucceed = true
+
+        // When
+        await sut.moveToNextStep()
+
+        // Then
+        XCTAssertEqual(sut.currentState, .goals)
+        XCTAssertTrue(mockService.updateOnboardingStateCalled)
+    }
+
+    func test_moveToNextStep_transitionsFromDispositionsToReview() async {
+        // Given
+        sut.currentState = .dispositions
+        sut.childName = "Jane Doe"
+        sut.childBirthday = Calendar.current.date(byAdding: .year, value: -10, to: Date())!
+        sut.selectedGoals = ["Understanding feelings"]
+        sut.selectedTopics = ["emotions", "friends", "school"]
+        mockService.shouldSucceed = true
+        mockService.mockUser = TestFixtures.testUser
+
+        // When
+        await sut.moveToNextStep()
+
+        // Then
+        XCTAssertEqual(sut.currentState, .review)
+        XCTAssertTrue(mockService.createChildCalled)
+    }
+
+    func test_moveToNextStep_setsErrorMessage_whenServiceFails() async {
+        // Given
+        sut.currentState = .userInfo
+        sut.parentName = "John Doe"
+        mockService.shouldSucceed = false
+
+        // When
+        await sut.moveToNextStep()
+
+        // Then
+        XCTAssertNotNil(sut.errorMessage)
+        XCTAssertEqual(sut.currentState, .userInfo) // Should not transition on error
+    }
+
+    // MARK: - Child Data Save Tests
+
+    func test_saveChildData_createsChild_withAllData() async throws {
+        // Given
+        sut.childName = "Jane Doe"
+        sut.childBirthday = Calendar.current.date(byAdding: .year, value: -10, to: Date())!
+        sut.selectedGoals = ["Understanding feelings"]
+        sut.selectedTopics = ["emotions", "friends", "school"]
+        sut.talkativeScore = 7
+        sut.sensitiveScore = 5
+        sut.accountableScore = 8
+        mockService.shouldSucceed = true
+        mockService.mockUser = TestFixtures.testUser
+
+        // When
+        try await sut.saveChildData()
+
+        // Then
+        XCTAssertTrue(mockService.createChildCalled)
+        XCTAssertNotNil(mockService.mockChild)
+        XCTAssertEqual(mockService.mockChild?.name, "Jane Doe")
+        XCTAssertEqual(mockService.mockChild?.goals, ["Understanding feelings"])
+        XCTAssertEqual(mockService.mockChild?.topics.count, 3)
+    }
+
+    func test_saveChildData_includesCustomGoal_whenProvided() async throws {
+        // Given
+        sut.childName = "Jane Doe"
+        sut.childBirthday = Calendar.current.date(byAdding: .year, value: -10, to: Date())!
+        sut.selectedGoals = ["Understanding feelings"]
+        sut.customGoal = "Building confidence"
+        sut.selectedTopics = ["emotions", "friends", "school"]
+        mockService.shouldSucceed = true
+        mockService.mockUser = TestFixtures.testUser
+
+        // When
+        try await sut.saveChildData()
+
+        // Then
+        XCTAssertEqual(mockService.mockChild?.goals.count, 2)
+        XCTAssertTrue(mockService.mockChild?.goals.contains("Building confidence") ?? false)
+    }
+
+    func test_saveChildData_throwsError_whenNameIsEmpty() async {
+        // Given
+        sut.childName = "   "
+
+        // When/Then
+        do {
+            try await sut.saveChildData()
+            XCTFail("Should have thrown error")
+        } catch {
+            XCTAssertTrue(error is ValidationError)
+        }
+    }
+
+    // MARK: - Multiple Children Tests
+
+    func test_addAnotherChild_resetsForm_andTransitionsToChildInfo() async {
+        // Given
+        sut.currentState = .review
+        sut.childName = "First Child"
+        sut.selectedGoals = ["Goal 1"]
+        mockService.shouldSucceed = true
+
+        // When
+        await sut.addAnotherChild()
+
+        // Then
+        XCTAssertEqual(sut.currentState, .childInfo)
+        XCTAssertEqual(sut.childName, "")
+        XCTAssertTrue(sut.selectedGoals.isEmpty)
+        XCTAssertNotNil(sut.currentChildId)
+    }
+
+    // MARK: - Completion Tests
+
+    func test_completeOnboarding_updatesStateToComplete() async {
+        // Given
+        mockService.shouldSucceed = true
+
+        // When
+        await sut.completeOnboarding()
+
+        // Then
+        XCTAssertEqual(sut.currentState, .complete)
+        XCTAssertTrue(mockService.updateOnboardingStateCalled)
+    }
+
+    // MARK: - Error Handling Tests
+
+    func test_loadOnboardingState_setsErrorMessage_onNetworkFailure() async {
+        // Given
+        mockService.networkError = URLError(.notConnectedToInternet)
+
+        // When
+        await sut.loadOnboardingState()
+
+        // Then
+        XCTAssertNotNil(sut.errorMessage)
+        XCTAssertTrue(sut.errorMessage!.contains("Failed to load"))
+    }
+}
+```
+
+**Additional Test Files to Create:**
+
+1. **`OnboardingStateTests.swift`** - Test state machine logic
+2. **`ConversationTopicTests.swift`** - Test topic constants
+3. **`UserProfileTests.swift`** - Test model encoding/decoding
+4. **`ChildValidationTests.swift`** - Test child model validation
+
+**Action Items:**
+- [ ] Create `OnboardingViewModelTests.swift` (30 tests)
+- [ ] Create `OnboardingStateTests.swift` (10 tests)
+- [ ] Create `ConversationTopicTests.swift` (5 tests)
+- [ ] Run tests: `Cmd+U` in Xcode
+- [ ] Verify all tests pass and coverage ≥ 70%
+
+---
+
+#### Step 7.3: Integration Tests - SupabaseService
+
+**Goal**: Test API integration with mock responses (Target: 10 tests)
+
+**File**: `/Eko/EkoTests/Core/Services/SupabaseServiceIntegrationTests.swift`
+
+```swift
+import XCTest
+@testable import Eko
+import EkoCore
+
+final class SupabaseServiceIntegrationTests: XCTestCase {
+
+    var sut: SupabaseService!
+
+    override func setUp() async throws {
+        try await super.setUp()
+        // Use test Supabase instance or mock responses
+        // For MVP: Can skip if using MockSupabaseService throughout
+    }
+
+    // MARK: - User Profile Tests
+
+    func test_getUserProfile_returnsProfile_forAuthenticatedUser() async throws {
+        // Given: User is authenticated
+
+        // When
+        let profile = try await sut.getUserProfile()
+
+        // Then
+        XCTAssertNotNil(profile.id)
+        XCTAssertNotNil(profile.onboardingState)
+    }
+
+    func test_updateOnboardingState_updatesDatabase() async throws {
+        // Given
+        let newState = OnboardingState.childInfo
+
+        // When
+        try await sut.updateOnboardingState(newState)
+
+        // Then
+        let profile = try await sut.getUserProfile()
+        XCTAssertEqual(profile.onboardingState, newState)
+    }
+
+    // MARK: - Child CRUD Tests
+
+    func test_createChild_savesChildToDatabase() async throws {
+        // Given
+        let childData = TestFixtures.testChild
+
+        // When
+        let createdChild = try await sut.createChild(
+            name: childData.name,
+            age: childData.age,
+            birthday: childData.birthday,
+            goals: childData.goals,
+            topics: childData.topics,
+            temperament: childData.temperament,
+            temperamentTalkative: childData.temperamentTalkative,
+            temperamentSensitivity: childData.temperamentSensitivity,
+            temperamentAccountability: childData.temperamentAccountability
+        )
+
+        // Then
+        XCTAssertNotNil(createdChild.id)
+        XCTAssertEqual(createdChild.name, childData.name)
+        XCTAssertEqual(createdChild.goals, childData.goals)
+        XCTAssertEqual(createdChild.topics.count, 3)
+
+        // Cleanup
+        // try await sut.deleteChild(id: createdChild.id)
+    }
+
+    func test_fetchChildren_returnsAllUserChildren() async throws {
+        // Given: User has created children
+        let userId = TestFixtures.testUserId
+
+        // When
+        let children = try await sut.fetchChildren(forUserId: userId)
+
+        // Then
+        XCTAssertGreaterThanOrEqual(children.count, 0)
+    }
+
+    // MARK: - Error Handling Tests
+
+    func test_createChild_throwsError_whenBirthdayInFuture() async {
+        // Given
+        let futureDate = Calendar.current.date(byAdding: .year, value: 1, to: Date())!
+
+        // When/Then
+        do {
+            _ = try await sut.createChild(
+                name: "Test",
+                age: -1,
+                birthday: futureDate,
+                goals: ["Goal"],
+                topics: ["topic1", "topic2", "topic3"],
+                temperament: .easygoing
+            )
+            XCTFail("Should have thrown database constraint error")
+        } catch {
+            // Expected error
+            XCTAssertTrue(true)
+        }
+    }
+}
+```
+
+**Action Items:**
+- [ ] Create `SupabaseServiceIntegrationTests.swift` (10 tests)
+- [ ] Set up test Supabase instance or comprehensive mocks
+- [ ] Run integration tests: `Cmd+U`
+- [ ] Verify database operations work correctly
+
+**Note**: For MVP, integration tests can use `MockSupabaseService` instead of real database calls. Real integration tests can be added post-MVP.
+
+---
+
+#### Step 7.4: UI Tests - Critical Paths Only
+
+**Goal**: Automate 2-3 critical user journeys (Target: 3 tests max for MVP)
+
+**Setup**:
+1. File → New → Target → iOS UI Testing Bundle
+2. Name: `EkoUITests`
+3. Configure app launch arguments for testing
+
+**File**: `/Eko/EkoUITests/OnboardingFlowUITests.swift`
+
+```swift
+import XCTest
+
+final class OnboardingFlowUITests: XCTestCase {
+
+    let app = XCUIApplication()
+
+    override func setUp() {
+        super.setUp()
+        continueAfterFailure = false
+
+        // Configure app for UI testing
+        app.launchArguments = ["UI-TESTING", "DISABLE-ANIMATIONS"]
+        app.launch()
+    }
+
+    // MARK: - Happy Path Test
+
+    func testOnboardingFlow_completesSuccessfully_withOneChild() {
+        // Note: This test assumes mock authentication for UI testing
+        // You'll need to set up test authentication in your app when UI-TESTING flag is set
+
+        // Given: User is authenticated and at onboarding start
+
+        // Step 1: User Info
+        let nameField = app.textFields["parentNameField"]
+        XCTAssertTrue(nameField.waitForExistence(timeout: 3))
+        nameField.tap()
+        nameField.typeText("Test Parent")
+
+        let nextButton = app.buttons["nextButton"]
+        XCTAssertTrue(nextButton.isEnabled)
+        nextButton.tap()
+
+        // Step 2: Child Info
+        let childNameField = app.textFields["childNameField"]
+        XCTAssertTrue(childNameField.waitForExistence(timeout: 2))
+        childNameField.tap()
+        childNameField.typeText("Test Child")
+
+        // Select birthday (simplified - adjust based on your date picker implementation)
+        let datePicker = app.datePickers["childBirthdayPicker"]
+        if datePicker.exists {
+            // Interact with date picker
+        }
+
+        app.buttons["nextButton"].tap()
+
+        // Step 3: Goals
+        let goal1 = app.buttons["goal_understanding"]
+        XCTAssertTrue(goal1.waitForExistence(timeout: 2))
+        goal1.tap()
+
+        XCTAssertTrue(app.buttons["nextButton"].isEnabled)
+        app.buttons["nextButton"].tap()
+
+        // Step 4: Topics
+        let topic1 = app.buttons["topic_emotions"]
+        let topic2 = app.buttons["topic_friends"]
+        let topic3 = app.buttons["topic_school"]
+
+        XCTAssertTrue(topic1.waitForExistence(timeout: 2))
+        topic1.tap()
+        topic2.tap()
+        topic3.tap()
+
+        XCTAssertTrue(app.buttons["nextButton"].isEnabled)
+        app.buttons["nextButton"].tap()
+
+        // Step 5: Dispositions (navigate through 3 pages)
+        XCTAssertTrue(app.sliders["talkativeSlider"].waitForExistence(timeout: 2))
+        app.buttons["nextButton"].tap() // Page 2
+
+        XCTAssertTrue(app.sliders["sensitiveSlider"].exists)
+        app.buttons["nextButton"].tap() // Page 3
+
+        XCTAssertTrue(app.sliders["accountableSlider"].exists)
+        app.buttons["finishButton"].tap() // Complete dispositions
+
+        // Step 6: Review
+        let completeButton = app.buttons["completeSetupButton"]
+        XCTAssertTrue(completeButton.waitForExistence(timeout: 2))
+
+        // Verify child is displayed in review
+        XCTAssertTrue(app.staticTexts["Test Child"].exists)
+
+        completeButton.tap()
+
+        // Then: Should navigate to main app
+        // Verify main app screen appears (adjust based on your app)
+        XCTAssertTrue(app.navigationBars.element.waitForExistence(timeout: 3))
+    }
+
+    // MARK: - Validation Tests
+
+    func testOnboarding_disablesNextButton_whenNameIsEmpty() {
+        // Given: User is on User Info step
+        let nextButton = app.buttons["nextButton"]
+
+        // When: Name field is empty
+        // (default state)
+
+        // Then: Next button should be disabled
+        XCTAssertFalse(nextButton.isEnabled)
+    }
+
+    func testTopicsSelection_requiresMinimumThree() {
+        // Given: User navigates to Topics step
+        // (Navigate through previous steps first - abbreviated for brevity)
+
+        // When: User selects only 2 topics
+        let topic1 = app.buttons["topic_emotions"]
+        let topic2 = app.buttons["topic_friends"]
+
+        topic1.tap()
+        topic2.tap()
+
+        // Then: Next button should be disabled
+        XCTAssertFalse(app.buttons["nextButton"].isEnabled)
+
+        // When: User selects 3rd topic
+        app.buttons["topic_school"].tap()
+
+        // Then: Next button should be enabled
+        XCTAssertTrue(app.buttons["nextButton"].isEnabled)
+    }
+}
+```
+
+**Action Items:**
+- [ ] Create `EkoUITests` target
+- [ ] Create `OnboardingFlowUITests.swift` (3 tests)
+- [ ] Add accessibility identifiers to all interactive elements in views
+- [ ] Set up test authentication for UI testing
+- [ ] Run UI tests: `Cmd+U` (select EkoUITests scheme)
+
+**Note**: UI tests are slow. Only add critical path coverage for MVP. Expand post-launch.
+
+---
+
+#### Step 7.5: Manual Test Scenarios
+
+**Goal**: Document manual testing checklist for QA and release testing
+
+**Test Scenarios to Execute Manually**:
+
+**Scenario 1: New User - Complete Flow**
+- [ ] Fresh install → Google sign in → Complete all onboarding steps → Reach main app
+- [ ] Verify user profile created in database
+- [ ] Verify child created with all data (goals, topics, dispositions)
+- [ ] Verify onboarding state = COMPLETE
+
+**Scenario 2: Incomplete Onboarding - Resume**
+- [ ] Start onboarding → Stop at GOALS step → Force quit app
+- [ ] Reopen app → Verify resumes at GOALS step
+- [ ] Complete onboarding → Verify reaches main app
+
+**Scenario 3: Multiple Children**
+- [ ] Complete onboarding with 1st child → Reach REVIEW
+- [ ] Tap "Add Another Child" → Complete 2nd child
+- [ ] Verify REVIEW shows both children
+- [ ] Complete setup → Verify main app
+
+**Scenario 4: Network Failure Handling**
+- [ ] Enable airplane mode during onboarding
+- [ ] Attempt to proceed to next step
+- [ ] Verify error message appears
+- [ ] Disable airplane mode → Retry → Verify success
+
+**Scenario 5: Validation Enforcement**
+- [ ] Try to proceed with empty name → Verify button disabled
+- [ ] Try to proceed with < 3 topics → Verify button disabled
+- [ ] Try to proceed with 0 goals → Verify button disabled
+- [ ] Try to proceed with > 3 goals → Verify button disabled
+
+**Scenario 6: Edge Cases**
+- [ ] Enter very long name (100+ characters) → Verify handles gracefully
+- [ ] Select child birthday as today → Verify age = 0 accepted
+- [ ] Add custom goal with special characters → Verify saves correctly
+- [ ] Select all 12 topics → Verify all save correctly
+
+**Scenario 7: Existing User (Post-Migration)**
+- [ ] User who completed onboarding previously
+- [ ] Login → Verify skips onboarding → Goes to main app
+
+**Test Devices**:
+- [ ] iPhone SE 3rd Gen (smallest screen) - iOS 17.2
+- [ ] iPhone 15 Pro (latest) - iOS 17.2
+- [ ] iPad Pro (tablet layout) - iOS 17.2
+
+**Action Items:**
+- [ ] Execute all manual test scenarios before TestFlight release
+- [ ] Document any bugs found in GitHub issues
+- [ ] Retest after bug fixes
+- [ ] Get sign-off from QA/Product before production deployment
 
 ---
 
@@ -1219,28 +2061,92 @@ Track onboarding progress:
 
 ### Pre-Deployment
 
+**Database & Backend:**
 - [ ] All migration files created and tested locally
-- [ ] All Swift models created and building successfully
-- [ ] All views implemented and tested
-- [ ] Routing logic tested (auth → onboarding → main app)
-- [ ] Resume logic tested (logout, reinstall)
-- [ ] Error handling tested
+- [ ] Database migration tested on staging Supabase instance
+- [ ] RLS policies verified (users can only access own data)
+- [ ] Trigger functions tested (user_profile auto-creation)
 - [ ] Backfill script prepared for existing users
+
+**Code & Implementation:**
+- [ ] All Swift models created and building successfully
+- [ ] All views implemented with proper accessibility identifiers
+- [ ] Routing logic implemented (auth → onboarding → main app)
+- [ ] Error handling implemented for all API calls
+- [ ] Loading states added to all async operations
+
+**Testing:**
+- [ ] Unit tests passing: ≥40 tests, ≥70% coverage
+- [ ] Integration tests passing: ≥10 tests
+- [ ] UI tests passing: ≥3 critical path tests
+- [ ] All manual test scenarios executed successfully (7 scenarios)
+- [ ] Tested on iPhone SE 3rd Gen, iPhone 15 Pro, iPad Pro
+- [ ] Tested with poor network conditions (airplane mode)
+- [ ] No flaky tests (all tests run 3x successfully)
+- [ ] Code coverage report generated and reviewed
+
+**Code Quality:**
+- [ ] No compiler warnings
+- [ ] No memory leaks detected (Instruments Leaks tool)
+- [ ] Performance acceptable (loading < 3 seconds)
+- [ ] Accessibility tested with VoiceOver
 
 ### Deployment
 
+**Backend Deployment:**
 - [ ] Run migration on production Supabase instance
+- [ ] Verify migration succeeded (check tables exist)
 - [ ] Run backfill script for existing users
-- [ ] Deploy app update to TestFlight
-- [ ] Test with fresh install on physical device
-- [ ] Test with existing user account
+- [ ] Verify existing users have onboardingState = COMPLETE
+
+**App Deployment:**
+- [ ] Deploy app update to TestFlight (internal testing)
+- [ ] Internal team testing (2-3 people, 2-3 days)
+- [ ] Fix any critical bugs found
+- [ ] Deploy to TestFlight (external testing)
+- [ ] Beta tester feedback collected
+
+**Device Testing:**
+- [ ] Test with fresh install on iPhone (physical device)
+- [ ] Test with fresh install on iPad (physical device)
+- [ ] Test with existing user account (upgrade flow)
+- [ ] Test on iOS 17.0 (minimum version)
+- [ ] Test on latest iOS version
+
+**Verification:**
+- [ ] Verify database records created correctly
+- [ ] Verify analytics tracking onboarding events (if implemented)
+- [ ] Verify no crashes in TestFlight crash logs
+- [ ] Verify user can complete onboarding end-to-end
 
 ### Post-Deployment
 
-- [ ] Monitor error logs for onboarding failures
-- [ ] Track onboarding completion rate
-- [ ] Gather user feedback
-- [ ] Iterate on UX improvements
+**Monitoring (First Week):**
+- [ ] Monitor error logs for onboarding failures (daily)
+- [ ] Track onboarding completion rate (target: > 80%)
+- [ ] Track onboarding drop-off points
+- [ ] Monitor API error rates for onboarding endpoints
+- [ ] Check user feedback in TestFlight comments
+
+**Metrics to Track:**
+- [ ] % of users who start onboarding
+- [ ] % of users who complete onboarding
+- [ ] Average time to complete onboarding
+- [ ] Most common drop-off step
+- [ ] Number of multiple children added
+
+**Iteration:**
+- [ ] Gather user feedback via TestFlight or support channels
+- [ ] Create GitHub issues for any bugs or UX improvements
+- [ ] Prioritize fixes for critical issues (blocking progress)
+- [ ] Plan next iteration based on data
+
+**Production Release:**
+- [ ] All critical issues resolved
+- [ ] Onboarding completion rate ≥ 75%
+- [ ] No P0/P1 bugs remaining
+- [ ] Product/QA sign-off obtained
+- [ ] Submit to App Store review
 
 ---
 
@@ -1288,15 +2194,47 @@ Track onboarding progress:
 | Keep `age` field or compute from `birthday`? | Keep both | Oct 19 | `age` used elsewhere, redundancy acceptable |
 | Allow skipping onboarding? | No (for MVP) | Oct 19 | All features require child profiles |
 | Support deleting children during onboarding? | No | Oct 19 | Can be added to settings later |
+| Unit test coverage target for onboarding? | 70-80% | Jan 20 | Balance between quality and velocity |
+| Use protocol-based mocking or framework? | Protocol-based | Jan 20 | Simpler, faster, no external dependencies |
+| Number of UI tests for MVP? | 3 critical paths | Jan 20 | UI tests are slow, focus on happy path |
+| Test with real Supabase or mocks? | Mocks for MVP | Jan 20 | Faster, can add real integration tests later |
 
 ---
 
 ## Support & Resources
 
-- **Onboarding Spec**: `/docs/ai/features/onboarding/feature-details.md`
+### Documentation
+- **Feature Specification**: `/docs/ai/features/onboarding/feature-details.md`
+- **Testing Strategy**: `/docs/ai/project-wide/testing-strategy.md`
 - **Project Overview**: `/docs/ai/project-wide/project-overview.md`
-- **Supabase Docs**: https://supabase.com/docs
-- **SwiftUI Docs**: https://developer.apple.com/documentation/swiftui
+
+### External Resources
+- **Supabase Documentation**: https://supabase.com/docs
+- **SwiftUI Documentation**: https://developer.apple.com/documentation/swiftui
+- **XCTest Framework**: https://developer.apple.com/documentation/xctest
+- **iOS Testing Guide**: https://developer.apple.com/library/archive/documentation/DeveloperTools/Conceptual/testing_with_xcode/
+
+### Testing Tools
+- **Xcode Instruments**: For memory leak detection and performance profiling
+- **TestFlight**: For beta testing and crash log analysis
+- **GitHub Actions**: For CI/CD test automation
+
+---
+
+## Summary
+
+This implementation plan covers:
+- **8 Phases**: Database setup → Models → Services → ViewModels → Views → Integration → **Testing** → Polish
+- **7 Onboarding Steps**: User Info → Child Info → Goals → Topics → Dispositions → Review → Complete
+- **50+ Automated Tests**: Unit, integration, and UI tests for comprehensive coverage
+- **7 Manual Test Scenarios**: Critical path validation before release
+- **Comprehensive Deployment Checklist**: Pre-deployment → Deployment → Post-deployment monitoring
+
+**Key Success Metrics**:
+- ≥70% unit test coverage
+- ≥80% onboarding completion rate
+- < 5% error rate for onboarding API calls
+- < 3 seconds average completion time per step
 
 ---
 

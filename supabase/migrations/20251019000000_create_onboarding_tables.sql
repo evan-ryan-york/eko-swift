@@ -50,15 +50,24 @@ COMMENT ON COLUMN user_profiles.current_child_id IS 'Temporary field tracking wh
 ALTER TABLE children
 ADD COLUMN IF NOT EXISTS birthday DATE,
 ADD COLUMN IF NOT EXISTS goals TEXT[] DEFAULT '{}',
-ADD COLUMN IF NOT EXISTS topics TEXT[] DEFAULT '{}';
+ADD COLUMN IF NOT EXISTS topics TEXT[] DEFAULT '{}',
+ADD COLUMN IF NOT EXISTS temperament_talkative INTEGER DEFAULT 5,
+ADD COLUMN IF NOT EXISTS temperament_sensitivity INTEGER DEFAULT 5,
+ADD COLUMN IF NOT EXISTS temperament_accountability INTEGER DEFAULT 5;
 
--- Add validation
+-- Add validation constraints
 ALTER TABLE children
-ADD CONSTRAINT valid_birthday CHECK (birthday <= CURRENT_DATE);
+ADD CONSTRAINT valid_birthday CHECK (birthday <= CURRENT_DATE),
+ADD CONSTRAINT valid_temperament_talkative CHECK (temperament_talkative BETWEEN 1 AND 10),
+ADD CONSTRAINT valid_temperament_sensitivity CHECK (temperament_sensitivity BETWEEN 1 AND 10),
+ADD CONSTRAINT valid_temperament_accountability CHECK (temperament_accountability BETWEEN 1 AND 10);
 
 COMMENT ON COLUMN children.birthday IS 'Child''s date of birth (ISO date)';
 COMMENT ON COLUMN children.goals IS 'Parent conversation goals (1-3 items from onboarding)';
 COMMENT ON COLUMN children.topics IS 'Selected conversation topic IDs (minimum 3 from onboarding)';
+COMMENT ON COLUMN children.temperament_talkative IS 'Communication style: 1 (Quiet) to 10 (Talkative)';
+COMMENT ON COLUMN children.temperament_sensitivity IS 'Emotional response: 1 (Argumentative) to 10 (Sensitive)';
+COMMENT ON COLUMN children.temperament_accountability IS 'Responsibility: 1 (Denial) to 10 (Accountable)';
 
 -- ============================================================================
 -- 3. Auto-create user_profile on signup (trigger function)
