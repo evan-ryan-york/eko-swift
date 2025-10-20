@@ -13,21 +13,14 @@ struct EkoApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                if authViewModel.isAuthenticated {
-                    // Main app content (to be implemented)
-                    ContentView()
-                } else {
-                    // Authentication flow
-                    LoginView(viewModel: authViewModel)
+            RootView()
+                .environment(authViewModel)
+                .onOpenURL { url in
+                    // Handle OAuth callback from Supabase
+                    Task {
+                        await authViewModel.handleOAuthCallback(url: url)
+                    }
                 }
-            }
-            .onOpenURL { url in
-                // Handle OAuth callback from Supabase
-                Task {
-                    await authViewModel.handleOAuthCallback(url: url)
-                }
-            }
         }
     }
 }

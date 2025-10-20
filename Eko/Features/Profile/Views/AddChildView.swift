@@ -195,9 +195,14 @@ struct AddChildView: View {
             print("  Sensitivity: \(Int(sensitivityScore))")
             print("  Accountability: \(Int(accountabilityScore))")
 
+            // Calculate birthday from age
+            let calendar = Calendar.current
+            let birthday = calendar.date(byAdding: .year, value: -age, to: Date()) ?? Date()
+
             let child = try await supabase.createChild(
                 name: name,
                 age: age,
+                birthday: birthday,
                 temperament: selectedTemperament,
                 temperamentTalkative: Int(talkativeScore),
                 temperamentSensitivity: Int(sensitivityScore),

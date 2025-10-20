@@ -197,6 +197,7 @@ struct LibraryView: View {
 }
 
 struct ProfileView: View {
+    @Environment(AuthViewModel.self) private var authViewModel
     @State private var showAddChild = false
     @State private var children: [Child] = []
     @State private var isLoading = true
@@ -253,7 +254,7 @@ struct ProfileView: View {
                 Section {
                     Button("Sign Out") {
                         Task {
-                            try? await supabase.signOut()
+                            await authViewModel.signOut()
                         }
                     }
                     .font(.ekoBody)

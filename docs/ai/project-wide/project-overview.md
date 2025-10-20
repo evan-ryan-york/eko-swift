@@ -213,7 +213,3 @@ Paid subscription model unlocking full feature access.
 **User Value**: Clear value exchange where premium features deliver measurable parenting confidence and skill development.
 
 ---
-
-## 4. How Features Work Together
-
-Eko's power comes from how features reinforce each other:
