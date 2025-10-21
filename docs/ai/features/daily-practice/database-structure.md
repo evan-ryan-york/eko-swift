@@ -1,24 +1,20 @@
-# Daily Practice Activities - ACTUAL Database Schema
+# Daily Practice Activities - Complete Database Schema
 
-**⚠️ IMPORTANT: This is the ACTUAL schema based on your database, not the migration files.**
-
----
-
-## Database Structure
-
-**ONE TABLE ONLY**: `daily_practice_activities`
-
-Everything is stored in a single table with JSONB columns for complex data:
-- `prompts` - JSONB column containing all prompts and their options
-- `actionable_takeaway` - JSONB column containing the takeaway
-
-**NO separate tables for prompts, options, or takeaways.**
+## Table of Contents
+1. [Main Activity Table](#daily_practice_activities)
+2. [Prompts Table](#prompts)
+3. [Prompt Options Table](#prompt_options)
+4. [Actionable Takeaways Table](#actionable_takeaways)
+5. [Relationships & Constraints](#relationships)
+6. [Enum Values & Data Shapes](#enums-and-data-shapes)
 
 ---
 
-## daily_practice_activities Table
+## 1. daily_practice_activities
 
-### Complete Schema
+Main table storing activity metadata, scenario, and research information.
+
+### Schema
 
 ```sql
 CREATE TABLE daily_practice_activities (
@@ -50,37 +46,31 @@ CREATE TABLE daily_practice_activities (
   research_citation TEXT,
   research_additional_context TEXT,
 
-  -- Additional content
+  -- Additional content (optional)
   best_approach TEXT,
   follow_up_questions JSONB DEFAULT '[]'::jsonb,
-
-  -- Complex data as JSONB (REQUIRED)
-  prompts JSONB NOT NULL,
-  actionable_takeaway JSONB NOT NULL,
 
   -- Constraints
   UNIQUE(day_number, age_band)
 );
 ```
 
----
-
-## Column Definitions
+### Column Definitions
 
 | Column | Type | Required | Default | Description |
 |--------|------|----------|---------|-------------|
 | `id` | UUID | Auto | gen_random_uuid() | Primary key |
 | `created_at` | TIMESTAMPTZ | Auto | NOW() | Record creation timestamp |
-| `updated_at` | TIMESTAMPTZ | Auto | NOW() | Record update timestamp |
+| `updated_at` | TIMESTAMPTZ | Auto | NOW() | Record update timestamp (auto-updated) |
 | `day_number` | INTEGER | **YES** | - | Day 1-61 in Foundation curriculum |
-| `age_band` | TEXT | **YES** | - | `'6-9'` \| `'10-12'` \| `'13-16'` |
+| `age_band` | TEXT | **YES** | - | Child age range (see [Allowed Values](#age_band)) |
 | `module_name` | TEXT | **YES** | - | Module identifier (e.g., 'state-recognition') |
 | `module_display_name` | TEXT | **YES** | - | Human-readable module name |
 | `title` | TEXT | **YES** | - | Activity title |
 | `description` | TEXT | No | NULL | Activity description |
 | `skill_focus` | TEXT | **YES** | - | Primary skill being taught |
 | `category` | TEXT | No | NULL | Category classification |
-| `activity_type` | TEXT | **YES** | 'basic-scenario' | See [Activity Types](#activity-types) |
+| `activity_type` | TEXT | **YES** | 'basic-scenario' | Activity format (see [Allowed Values](#activity_type)) |
 | `is_reflection` | BOOLEAN | No | FALSE | Whether this is a reflection activity |
 | `scenario` | TEXT | **YES** | - | The scenario narrative (2-4 sentences) |
 | `research_concept` | TEXT | No | NULL | Research concept being referenced |
@@ -88,144 +78,228 @@ CREATE TABLE daily_practice_activities (
 | `research_citation` | TEXT | No | NULL | Citation for research |
 | `research_additional_context` | TEXT | No | NULL | Additional research context |
 | `best_approach` | TEXT | No | NULL | Optional best approach guidance |
-| `follow_up_questions` | JSONB | No | `[]` | Array of question strings |
-| `prompts` | JSONB | **YES** | - | Array of prompt objects (see [shape](#prompts-jsonb)) |
-| `actionable_takeaway` | JSONB | **YES** | - | Takeaway object (see [shape](#actionable_takeaway-jsonb)) |
+| `follow_up_questions` | JSONB | No | `[]` | Array of follow-up question strings |
+
+### Constraints
+- **UNIQUE**: `(day_number, age_band)` - Each day can only have one activity per age band
+- **CHECK**: `age_band IN ('6-9', '10-12', '13-16')`
 
 ---
 
-## JSONB Column Shapes
+## 2. prompts
 
-### <a name="prompts-jsonb"></a>prompts (JSONB Array)
+Questions/prompts within each activity. Each activity has 2-4 prompts.
 
-**Structure:**
-```json
-[
-  {
-    "promptId": "p1",
-    "type": "state-identification",
-    "promptText": "What state is your child in?",
-    "order": 1,
-    "points": 10,
-    "options": [
-      {
-        "optionId": "opt-1",
-        "optionText": "Dysregulated (State 1)",
-        "correct": true,
-        "points": 10,
-        "feedback": "Correct! The inability to speak indicates...",
-        "scienceNote": {
-          "brief": "When dysregulated, the amygdala hijacks the prefrontal cortex",
-          "citation": "Porges, S. W. (2011). The Polyvagal Theory",
-          "showCitation": false
-        }
-      },
-      {
-        "optionId": "opt-2",
-        "optionText": "Emotionally Activated (State 2)",
-        "correct": false,
-        "points": 0,
-        "feedback": "In State 2, children can still use words..."
-      }
-      // ... 2 more options (total of 4)
-    ]
-  }
-  // ... more prompts (typically 2-4 total)
-]
+### Schema
+
+```sql
+CREATE TABLE prompts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+
+  -- Foreign key
+  activity_id UUID NOT NULL REFERENCES daily_practice_activities(id) ON DELETE CASCADE,
+
+  -- Prompt metadata
+  prompt_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  prompt_text TEXT NOT NULL,
+  order_index INTEGER NOT NULL,
+  points INTEGER DEFAULT 10,
+
+  UNIQUE(activity_id, prompt_id)
+);
 ```
 
-**Prompt Object Fields:**
+### Column Definitions
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `promptId` | string | **YES** | Unique ID like 'p1', 'p2', 'p3' |
-| `type` | string | **YES** | Prompt type (see [types](#prompt-types)) |
-| `promptText` | string | **YES** | The question text |
-| `order` | number | **YES** | Display order (1, 2, 3...) |
-| `points` | number | No | Points for correct answer (default: 10) |
-| `options` | array | **YES** | Array of 4 option objects |
+| Column | Type | Required | Default | Description |
+|--------|------|----------|---------|-------------|
+| `id` | UUID | Auto | gen_random_uuid() | Primary key |
+| `created_at` | TIMESTAMPTZ | Auto | NOW() | Record creation timestamp |
+| `activity_id` | UUID | **YES** | - | Foreign key to daily_practice_activities |
+| `prompt_id` | TEXT | **YES** | - | Prompt identifier (e.g., 'p1', 'p2', 'p3') |
+| `type` | TEXT | **YES** | - | Prompt type (see [Allowed Values](#prompt_type)) |
+| `prompt_text` | TEXT | **YES** | - | The actual question text |
+| `order_index` | INTEGER | **YES** | - | Display order (1, 2, 3, etc.) |
+| `points` | INTEGER | No | 10 | Points awarded for correct answer |
 
-**Option Object Fields:**
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `optionId` | string | **YES** | Unique ID like 'opt-1', 'opt-2' |
-| `optionText` | string | **YES** | The answer choice text |
-| `correct` | boolean | **YES** | Whether this is correct (exactly 1 per prompt) |
-| `points` | number | **YES** | Points (10 for correct, 0 for wrong) |
-| `feedback` | string | **YES** | Feedback text (2-3 sentences) |
-| `scienceNote` | object | No | Science explanation (optional) |
-| `scienceNote.brief` | string | No | Brief explanation (1-2 sentences) |
-| `scienceNote.citation` | string | No | Citation text |
-| `scienceNote.showCitation` | boolean | No | Whether to show citation (default: false) |
-
-**Business Rules:**
-- Each activity must have 2-4 prompts
-- Each prompt must have exactly 4 options
-- Exactly 1 option per prompt must have `correct: true`
-- Only correct options should have `scienceNote`
+### Constraints
+- **UNIQUE**: `(activity_id, prompt_id)` - Each prompt_id must be unique within an activity
+- **CASCADE DELETE**: When activity is deleted, all prompts are deleted
 
 ---
 
-### <a name="actionable_takeaway-jsonb"></a>actionable_takeaway (JSONB Object)
+## 3. prompt_options
 
-**Structure:**
-```json
-{
-  "toolName": "The State Check",
-  "toolType": "diagnostic",
-  "whenToUse": "before you respond to any challenging behavior",
-  "howTo": [
-    "Pause and observe: What do you see and hear right now?",
-    "Ask yourself: Can my child think and talk calmly in this moment?",
-    "If NO → They need help calming down first",
-    "If YES → They can engage in conversation"
-  ],
-  "whyItWorks": "Different nervous system states require completely different responses...",
-  "tryItWhen": "Your child is upset about something this week",
-  "example": {
-    "situation": "Your child comes inside crying because their friend said something mean",
-    "action": "You pause and do a State Check. You notice they're sobbing but trying to tell you what happened. You sit close and say, 'That sounds really hard' and listen.",
-    "outcome": "Your child calms down as they share the story, and together you problem-solve."
-  }
-}
+Answer choices for each prompt. Each prompt has exactly 4 options (1 correct, 3 wrong).
+
+### Schema
+
+```sql
+CREATE TABLE prompt_options (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+
+  -- Foreign key
+  prompt_id UUID NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+
+  -- Option metadata
+  option_id TEXT NOT NULL,
+  option_text TEXT NOT NULL,
+  correct BOOLEAN DEFAULT FALSE,
+  points INTEGER DEFAULT 0,
+
+  -- Feedback
+  feedback TEXT NOT NULL,
+
+  -- Science note (optional)
+  science_note_brief TEXT,
+  science_note_citation TEXT,
+  science_note_show_citation BOOLEAN DEFAULT FALSE,
+
+  UNIQUE(prompt_id, option_id)
+);
 ```
 
-**Takeaway Object Fields:**
+### Column Definitions
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `toolName` | string | **YES** | Name of the tool/technique |
-| `toolType` | string | No | Type (see [types](#tool-types)) |
-| `whenToUse` | string | **YES** | When to apply this tool |
-| `howTo` | array | **YES** | Array of step strings (3-5 steps) |
-| `whyItWorks` | string | **YES** | Explanation of effectiveness |
-| `tryItWhen` | string | No | Specific prompt for this week |
-| `example` | object | No | Example story object |
-| `example.situation` | string | **YES** | Brief situation description |
-| `example.action` | string | **YES** | What parent does/says |
-| `example.outcome` | string | **YES** | What happens as a result |
+| Column | Type | Required | Default | Description |
+|--------|------|----------|---------|-------------|
+| `id` | UUID | Auto | gen_random_uuid() | Primary key |
+| `created_at` | TIMESTAMPTZ | Auto | NOW() | Record creation timestamp |
+| `prompt_id` | UUID | **YES** | - | Foreign key to prompts |
+| `option_id` | TEXT | **YES** | - | Option identifier (e.g., 'opt-1', 'opt-2') |
+| `option_text` | TEXT | **YES** | - | The answer choice text |
+| `correct` | BOOLEAN | No | FALSE | Whether this is the correct answer |
+| `points` | INTEGER | No | 0 | Points awarded (usually 10 for correct, 0 for wrong) |
+| `feedback` | TEXT | **YES** | - | Feedback shown after selection (2-3 sentences) |
+| `science_note_brief` | TEXT | No | NULL | Brief science explanation (1-2 sentences) |
+| `science_note_citation` | TEXT | No | NULL | Citation for science note |
+| `science_note_show_citation` | BOOLEAN | No | FALSE | Whether to display citation |
+
+### Constraints
+- **UNIQUE**: `(prompt_id, option_id)` - Each option_id must be unique within a prompt
+- **CASCADE DELETE**: When prompt is deleted, all options are deleted
+- **Business Rule**: Each prompt should have exactly 4 options, with exactly 1 correct
 
 ---
 
-## Enums and Allowed Values
+## 4. actionable_takeaways
 
-### <a name="activity-types"></a>Activity Types
+Actionable tool/technique provided at the end of each activity. One per activity.
+
+### Schema
+
+```sql
+CREATE TABLE actionable_takeaways (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+
+  -- Foreign key
+  activity_id UUID NOT NULL REFERENCES daily_practice_activities(id) ON DELETE CASCADE,
+
+  -- Tool metadata
+  tool_name TEXT NOT NULL,
+  tool_type TEXT,
+  when_to_use TEXT NOT NULL,
+  why_it_works TEXT NOT NULL,
+  try_it_when TEXT,
+
+  -- Steps and example
+  how_to JSONB NOT NULL,
+  example JSONB,
+
+  UNIQUE(activity_id)
+);
+```
+
+### Column Definitions
+
+| Column | Type | Required | Default | Description |
+|--------|------|----------|---------|-------------|
+| `id` | UUID | Auto | gen_random_uuid() | Primary key |
+| `created_at` | TIMESTAMPTZ | Auto | NOW() | Record creation timestamp |
+| `activity_id` | UUID | **YES** | - | Foreign key to daily_practice_activities |
+| `tool_name` | TEXT | **YES** | - | Name of the tool/technique |
+| `tool_type` | TEXT | No | NULL | Type classification (see [Allowed Values](#tool_type)) |
+| `when_to_use` | TEXT | **YES** | - | When to apply this tool |
+| `why_it_works` | TEXT | **YES** | - | Explanation of why it's effective |
+| `try_it_when` | TEXT | No | NULL | Specific prompt to try this week |
+| `how_to` | JSONB | **YES** | - | Array of step strings (see [Data Shape](#how_to_shape)) |
+| `example` | JSONB | No | NULL | Example object (see [Data Shape](#example_shape)) |
+
+### Constraints
+- **UNIQUE**: `activity_id` - Each activity can have only one takeaway
+- **CASCADE DELETE**: When activity is deleted, takeaway is deleted
+
+---
+
+## 5. Relationships & Constraints
+
+### Relationship Diagram
+
+```
+daily_practice_activities (1)
+  ├── prompts (2-4)
+  │   └── prompt_options (4 each)
+  └── actionable_takeaways (1)
+```
+
+### Cascade Deletion Rules
+
+- Deleting an **activity** deletes all related prompts, options, and takeaways
+- Deleting a **prompt** deletes all related options
+- **Cannot delete** if it would leave orphaned records
+
+### Indexes
+
+```sql
+-- Performance indexes
+CREATE INDEX idx_activities_day_age ON daily_practice_activities(day_number, age_band);
+CREATE INDEX idx_activities_module ON daily_practice_activities(module_name);
+CREATE INDEX idx_prompts_activity ON prompts(activity_id);
+CREATE INDEX idx_options_prompt ON prompt_options(prompt_id);
+```
+
+---
+
+## 6. Enums and Data Shapes
+
+### <a name="age_band"></a>age_band (Enum)
+
+**Allowed Values:**
+- `'6-9'` - Elementary age children
+- `'10-12'` - Middle childhood
+- `'13-16'` - Teenagers
+
+**Database Constraint:**
+```sql
+CHECK (age_band IN ('6-9', '10-12', '13-16'))
+```
+
+---
+
+### <a name="activity_type"></a>activity_type (Enum)
+
+**Allowed Values:**
 
 | Value | Description |
 |-------|-------------|
-| `'basic-scenario'` | Standard scenario with state identification (default) |
+| `'basic-scenario'` | Standard scenario with state identification |
 | `'spot-the-mistake'` | Identify what went wrong in a scenario |
 | `'before-after-comparison'` | Compare two approaches to the same situation |
 | `'sequential-decision'` | Multi-step decision-making scenario |
 | `'skill-application'` | Apply a specific skill to a new situation |
 | `'self-assessment'` | Reflection on own parenting patterns |
 
+**Default:** `'basic-scenario'`
+
 ---
 
-### <a name="prompt-types"></a>Prompt Types
+### <a name="prompt_type"></a>prompt_type (Enum-like)
 
-**Common values** (not database-constrained):
+**Common Values:**
 
 | Value | Description |
 |-------|-------------|
@@ -237,11 +311,13 @@ CREATE TABLE daily_practice_activities (
 | `'what-happens-next'` | Predict outcome of an approach |
 | `'reflection'` | Self-reflection question |
 
+**Note:** Not database-constrained. Can be any string.
+
 ---
 
-### <a name="tool-types"></a>Tool Types
+### <a name="tool_type"></a>tool_type (Enum-like)
 
-**Common values** (optional, not database-constrained):
+**Common Values:**
 
 | Value | Description |
 |-------|-------------|
@@ -250,16 +326,100 @@ CREATE TABLE daily_practice_activities (
 | `'framework'` | Conceptual framework for understanding |
 | `'response-pattern'` | Pattern for how to respond |
 
+**Note:** Optional field. Not database-constrained.
+
+---
+
+### <a name="how_to_shape"></a>how_to (JSONB Array)
+
+**Data Shape:**
+```json
+[
+  "Step 1: First action to take",
+  "Step 2: Second action to take",
+  "Step 3: Third action to take"
+]
+```
+
+**Example:**
+```json
+[
+  "Pause and observe: What do you see and hear right now?",
+  "Ask yourself: Can my child think and talk calmly in this moment?",
+  "If NO → They need help calming down first",
+  "If YES → They can engage in conversation"
+]
+```
+
+**Requirements:**
+- Array of strings
+- Each string is one step
+- Typically 3-5 steps
+- Steps should be concrete and actionable
+
+---
+
+### <a name="example_shape"></a>example (JSONB Object)
+
+**Data Shape:**
+```json
+{
+  "situation": "Brief description of the situation",
+  "action": "What the parent does/says",
+  "outcome": "What happens as a result"
+}
+```
+
+**Example:**
+```json
+{
+  "situation": "Your child comes inside crying because their friend said something mean at the playground",
+  "action": "Before jumping in to fix it, you pause and do a State Check. You notice they're sobbing but trying to tell you what happened. They CAN talk = they can engage. You sit close and say, 'That sounds really hard' and listen.",
+  "outcome": "Your child calms down as they share the story, and together you problem-solve what to do next time."
+}
+```
+
+**Requirements:**
+- Object with exactly 3 keys
+- All values are strings
+- Should tell a complete mini-story
+
+---
+
+### follow_up_questions (JSONB Array)
+
+**Data Shape:**
+```json
+[
+  "Question 1 text here?",
+  "Question 2 text here?",
+  "Question 3 text here?"
+]
+```
+
+**Example:**
+```json
+[
+  "How might this look different with a teenager versus a 7-year-old?",
+  "What would you do if your child was in State 1 (dysregulated)?",
+  "When has a similar situation happened in your family?"
+]
+```
+
+**Requirements:**
+- Array of strings
+- Each string is a question
+- Typically 0-5 questions
+- Defaults to empty array `[]`
+
 ---
 
 ## Complete Example Record
 
+### Activity JSON (as generated by AI)
+
 ```json
 {
-  "id": "9146282d-0c00-435b-b906-a2c86cdc8f7a",
-  "created_at": "2025-10-21T10:34:55.260340Z",
-  "updated_at": "2025-10-21T10:34:55.260340Z",
-
   "day_number": 1,
   "age_band": "6-9",
   "module_name": "state-recognition",
@@ -270,22 +430,18 @@ CREATE TABLE daily_practice_activities (
   "category": null,
   "activity_type": "basic-scenario",
   "is_reflection": false,
-
-  "scenario": "Your 8-year-old bursts through the door around 3:30pm, immediately asking for screen time. You say no because homework needs to be done first. First attempt: they throw the tablet, scream 'I hate you!' and run to their room, slamming the door. Second attempt (next day, same request): they sigh heavily, say 'That's not fair,' but sit down at the table.",
-
-  "research_concept": "polyvagal theory and the neurobiology of emotional regulation",
-  "research_key_insight": "The nervous system operates in different states that determine what's neurologically possible...",
-  "research_citation": "Porges, S. W. (2011). The Polyvagal Theory: Neurophysiological Foundations...",
-  "research_additional_context": "Dr. Dan Siegel describes this as 'flipping your lid'—when the thinking brain goes offline...",
-
+  "scenario": "Your 8-year-old asks for screen time right after school...",
+  "research_concept": "polyvagal theory",
+  "research_key_insight": "The nervous system operates in different states...",
+  "research_citation": "Porges, S. W. (2011). The Polyvagal Theory",
+  "research_additional_context": "Dr. Dan Siegel describes this as 'flipping your lid'...",
   "best_approach": null,
   "follow_up_questions": [],
-
   "prompts": [
     {
       "promptId": "p1",
       "type": "best-response",
-      "promptText": "Why did the same words ('no screen time until homework is done') get such different reactions?",
+      "promptText": "Why did the same words get different reactions?",
       "order": 1,
       "points": 10,
       "options": [
@@ -294,10 +450,10 @@ CREATE TABLE daily_practice_activities (
           "optionText": "Different nervous system states",
           "correct": true,
           "points": 10,
-          "feedback": "Exactly! Your child's nervous system state determines what they can hear and process. Same words + different state = different outcome.",
+          "feedback": "Exactly! Your child's nervous system state determines...",
           "scienceNote": {
-            "brief": "When dysregulated, the amygdala hijacks the prefrontal cortex, making reasoning impossible.",
-            "citation": "Porges, S. W. (2011). The Polyvagal Theory",
+            "brief": "When dysregulated, the amygdala hijacks the prefrontal cortex",
+            "citation": "Porges, S. W. (2011)",
             "showCitation": false
           }
         },
@@ -306,42 +462,27 @@ CREATE TABLE daily_practice_activities (
           "optionText": "Child is being manipulative",
           "correct": false,
           "points": 0,
-          "feedback": "Different reactions aren't manipulation—they reflect real differences in nervous system capacity. Your child isn't choosing to be difficult; their brain is in a different state."
-        },
-        {
-          "optionId": "opt-3",
-          "optionText": "You need better words",
-          "correct": false,
-          "points": 0,
-          "feedback": "The problem isn't your words—it's the mismatch between your approach and your child's state. Perfect words won't work if your child's thinking brain is offline."
-        },
-        {
-          "optionId": "opt-4",
-          "optionText": "Child should control reactions",
-          "correct": false,
-          "points": 0,
-          "feedback": "When dysregulated, children cannot 'just control themselves.' Self-control requires a calm nervous system and an online prefrontal cortex."
+          "feedback": "Different reactions aren't manipulation—they reflect real differences..."
         }
       ]
     }
   ],
-
   "actionable_takeaway": {
     "toolName": "The State Check",
     "toolType": "diagnostic",
-    "whenToUse": "before you respond to any challenging behavior or difficult moment with your child",
+    "whenToUse": "before you respond to any challenging behavior",
     "howTo": [
       "Pause and observe: What do you see and hear right now?",
-      "Ask yourself: Can my child think and talk calmly in this moment?",
-      "If NO (screaming, can't talk, extremely upset) → They need help calming down first",
-      "If YES (can talk, even if upset or resistant) → They can engage in conversation"
+      "Ask yourself: Can my child think and talk calmly?",
+      "If NO → They need help calming down first",
+      "If YES → They can engage in conversation"
     ],
-    "whyItWorks": "Different nervous system states require completely different responses. What works when your child is calm will backfire when they're overwhelmed.",
+    "whyItWorks": "Different nervous system states require different responses...",
     "tryItWhen": "Your child is upset about something this week",
     "example": {
-      "situation": "Your child comes inside crying because their friend said something mean at the playground",
-      "action": "Before jumping in to fix it or give advice, you pause and do a State Check. You notice they're sobbing but trying to tell you what happened. They CAN talk = they can engage. You sit close and say, 'That sounds really hard' and listen, instead of immediately problem-solving.",
-      "outcome": "Your child calms down as they share the story, and together you problem-solve what to do next time."
+      "situation": "Your child comes inside crying...",
+      "action": "You pause and do a State Check...",
+      "outcome": "Your child calms down as they share..."
     }
   }
 }
@@ -349,22 +490,25 @@ CREATE TABLE daily_practice_activities (
 
 ---
 
-## Summary
+## Summary Statistics
 
 **Database Structure:**
-- **1 table only**: `daily_practice_activities`
-- **23 total columns**
-- **2 JSONB columns** for complex nested data (prompts, actionable_takeaway)
-- **1 unique constraint**: (day_number, age_band)
+- **4 tables** (1 main + 3 related)
+- **46 total columns** across all tables
+- **8 foreign key relationships**
+- **4 unique constraints**
+- **4 indexes** for query performance
 
 **Typical Activity Contains:**
 - 1 scenario (2-4 sentences)
-- 2-4 prompts in JSONB
-- 8-16 options total (4 per prompt) in JSONB
-- 1 actionable takeaway in JSONB
+- 2-4 prompts
+- 8-16 options (4 per prompt)
+- 1 actionable takeaway
 - 3-5 how-to steps
 - 1 example story
 
 **Data Volume (61-day Foundation curriculum):**
-- 183 total records (61 days × 3 age bands)
-- All prompts, options, and takeaways stored as JSONB within each record
+- 183 activities (61 days × 3 age bands)
+- ~550 prompts (avg 3 per activity)
+- ~2,200 options (4 per prompt)
+- 183 takeaways (1 per activity)

@@ -20,6 +20,7 @@ struct ContentView: View {
 
     enum Tab {
         case home
+        case dailyPractice
         case lyra
         case library
         case profile
@@ -33,6 +34,13 @@ struct ContentView: View {
                     Label("Home", systemImage: "house.fill")
                 }
                 .tag(Tab.home)
+
+            // Daily Practice Tab
+            DailyPracticeHomeView()
+                .tabItem {
+                    Label("Daily Practice", systemImage: "checkmark.circle.fill")
+                }
+                .tag(Tab.dailyPractice)
 
             // Lyra Tab - AI Chat
             NavigationStack {
