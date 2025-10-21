@@ -16,40 +16,44 @@ Create these tables in Supabase in this order:
 
 ```sql
 CREATE TABLE daily_practice_activities (
-  -- Identity
+  -- System fields
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+  -- Core identifiers (ALL REQUIRED)
   day_number INTEGER NOT NULL,
   age_band TEXT NOT NULL CHECK (age_band IN ('6-9', '10-12', '13-16')),
-  
-  -- Module organization
   module_name TEXT NOT NULL,
   module_display_name TEXT NOT NULL,
-  
-  -- Metadata
+
+  -- Activity metadata
   title TEXT NOT NULL,
   description TEXT,
+  skill_focus TEXT NOT NULL,
   category TEXT,
-  skill_focus TEXT,
-  
-  -- Content type
-  is_reflection BOOLEAN DEFAULT false,
-  
-  -- Main content
+  activity_type TEXT NOT NULL DEFAULT 'basic-scenario',
+  is_reflection BOOLEAN DEFAULT FALSE,
+
+  -- Scenario content (REQUIRED)
   scenario TEXT NOT NULL,
-  
-  -- Prompts (JSONB for flexibility)
-  prompts JSONB NOT NULL DEFAULT '[]'::jsonb,
-  
-  -- Actionable takeaway
-  actionable_takeaway JSONB NOT NULL,
-  
-  -- Optional enrichment
+
+  -- Research and learning (all optional)
+  research_concept TEXT,
+  research_key_insight TEXT,
+  research_citation TEXT,
+  research_additional_context TEXT,
+
+  -- Additional content
   best_approach TEXT,
-  follow_up_questions TEXT[] DEFAULT ARRAY[]::TEXT[],
-  
-  -- Timestamps
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  follow_up_questions JSONB DEFAULT '[]'::jsonb,
+
+  -- Complex data as JSONB (REQUIRED)
+  prompts JSONB NOT NULL,
+  actionable_takeaway JSONB NOT NULL,
+
+  -- Constraints
+  UNIQUE(day_number, age_band)
 );
 
 -- Indexes
@@ -527,15 +531,20 @@ struct Activity: Codable, Identifiable {
     let moduleDisplayName: String
     let title: String
     let description: String?
+    let skillFocus: String
     let category: String?
-    let skillFocus: String?
+    let activityType: String
     let isReflection: Bool
     let scenario: String
-    let prompts: [Prompt]
-    let actionableTakeaway: ActionableTakeaway
+    let researchConcept: String?
+    let researchKeyInsight: String?
+    let researchCitation: String?
+    let researchAdditionalContext: String?
     let bestApproach: String?
     let followUpQuestions: [String]?
-    
+    let prompts: [Prompt]
+    let actionableTakeaway: ActionableTakeaway
+
     enum CodingKeys: String, CodingKey {
         case id, title, description, category, scenario, prompts
         case dayNumber = "day_number"
@@ -543,10 +552,15 @@ struct Activity: Codable, Identifiable {
         case moduleName = "module_name"
         case moduleDisplayName = "module_display_name"
         case skillFocus = "skill_focus"
+        case activityType = "activity_type"
         case isReflection = "is_reflection"
-        case actionableTakeaway = "actionable_takeaway"
+        case researchConcept = "research_concept"
+        case researchKeyInsight = "research_key_insight"
+        case researchCitation = "research_citation"
+        case researchAdditionalContext = "research_additional_context"
         case bestApproach = "best_approach"
         case followUpQuestions = "follow_up_questions"
+        case actionableTakeaway = "actionable_takeaway"
     }
 }
 
@@ -637,11 +651,12 @@ struct PromptConfig: Codable {
 
 struct ActionableTakeaway: Codable {
     let toolName: String
+    let toolType: String?
     let whenToUse: String
     let howTo: [String]
     let whyItWorks: String
-    let tryItWhen: String
-    let example: TakeawayExample
+    let tryItWhen: String?
+    let example: TakeawayExample?
 }
 
 struct TakeawayExample: Codable {

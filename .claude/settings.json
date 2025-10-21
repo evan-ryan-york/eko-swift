@@ -1,0 +1,65 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(xcodebuild:*)",
+      "Bash(swift package:*)",
+      "Bash(python3:*)",
+      "Bash(npx supabase:*)",
+      "Bash(npm:*)",
+      "Bash(npx:*)",
+      "Bash(git:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx tsc --noEmit --pretty false 2>&1 | head -20 || echo '\n⚠️  TypeScript errors detected - fix before continuing'",
+            "description": "Run TypeScript compiler after every file edit to catch type errors immediately"
+          },
+          {
+            "type": "command",
+            "command": "npm test -- --findRelatedTests $CLAUDE_FILE_PATHS --passWithNoTests --silent 2>&1 | tail -10 || echo '\n⚠️  Tests failed - fix before continuing'",
+            "description": "Run tests for changed files after every edit to catch logic errors immediately"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "build-context-gatherer",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/build-context-verification.py",
+            "description": "Validate project context has required sections"
+          }
+        ]
+      },
+      {
+        "matcher": "build-planner",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/build-plan-verification.py",
+            "description": "Validate implementation plan structure and test specifications"
+          }
+        ]
+      },
+      {
+        "matcher": "build-executor",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '✅ Phase implementation complete. Running architectural review...'",
+            "description": "Notify that executor finished and checker will start"
+          }
+        ]
+      }
+    ]
+  }
+}

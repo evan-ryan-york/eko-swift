@@ -1,7 +1,7 @@
 {
   "name": "build-flow",
   "version": "1.0.0",
-  "description": "End-to-end workflow for building new features from unstructured plans",
+  "description": "End-to-end workflow for building new features from unstructured plans using test-driven development (TDD) and phase-level execution",
   "entry_point": "context-gatherer",
   "parameters": {
     "feature_id": {
@@ -13,8 +13,8 @@
   },
   "base_paths": {
     "feature_root": "docs/ai/features/{feature_id}",
-    "architecture": "docs/ai/project-wide/architecture.md",
-    "golden_paths": "docs/ai/project-wide/golden-path.md"
+    "architecture": "docs/ai/architecture",
+    "golden_paths": "docs/ai/golden-paths"
   },
   "nodes": {
     "context-gatherer": {
@@ -61,7 +61,7 @@
         {
           "type": "file",
           "path": "{feature_root}/project-context.md",
-          "description": "Structured context about the project",
+          "description": "Structured context about the project including tech stack, architecture, conventions, and key files",
           "validation": {
             "script": "python .claude/hooks/build-context-verification.py",
             "required_sections": [
@@ -80,7 +80,7 @@
     },
     "build-planner": {
       "agent": "build-planner",
-      "description": "Converts unstructured plan into phased implementation plan with specific steps",
+      "description": "Converts unstructured plan into phased implementation plan with specific steps and test specifications for TDD",
       "depends_on": ["context-gatherer"],
       "inputs": {
         "required": [
@@ -101,21 +101,22 @@
         {
           "type": "file",
           "path": "{feature_root}/implementation-plan.md",
-          "description": "Structured phased plan with steps",
+          "description": "Structured phased plan with steps and test specifications",
           "validation": {
             "script": "python .claude/hooks/build-plan-verification.py",
             "requirements": [
               "At least one phase",
               "Each phase has steps",
               "Steps are numbered sequentially",
-              "Has overview section"
+              "Has overview section",
+              "Test specifications included for logic steps"
             ]
           }
         },
         {
           "type": "file",
           "path": "{feature_root}/status-update.md",
-          "description": "Initial progress tracking file"
+          "description": "Initial progress tracking file with all steps as checkboxes"
         }
       ],
       "retry_policy": {
@@ -125,15 +126,22 @@
     },
     "build-executor": {
       "agent": "build-executor",
-      "description": "Implements individual steps from the plan",
+      "description": "Implements ENTIRE PHASES using TDD - writes tests first, then implementation for all steps in assigned phase",
       "depends_on": ["build-planner"],
+      "execution_scope": "phase",
       "inputs": {
         "required": [
           {
             "type": "file",
             "path": "{feature_root}/implementation-plan.md",
-            "description": "The full implementation plan",
+            "description": "The full implementation plan with test specifications",
             "from_node": "build-planner"
+          },
+          {
+            "type": "file",
+            "path": "{feature_root}/project-context.md",
+            "description": "Project architecture, golden paths, conventions",
+            "from_node": "context-gatherer"
           },
           {
             "type": "file",
@@ -146,67 +154,155 @@
       "outputs": [
         {
           "type": "files",
-          "pattern": "**/*",
-          "description": "Modified source files implementing the step"
+          "pattern": "**/*.{ts,tsx,js,jsx,py,md}",
+          "description": "Modified source and test files implementing the entire phase"
         },
         {
           "type": "file",
           "path": "{feature_root}/status-update.md",
-          "description": "Updated with step completion",
-          "update_type": "append"
+          "description": "Updated with all step completions in the phase",
+          "update_type": "modify"
         }
       ],
+      "continuous_validation": {
+        "hooks": [
+          {
+            "name": "typecheck",
+            "trigger": "PostToolUse",
+            "matcher": "Write|Edit",
+            "command": "npx tsc --noEmit --pretty false 2>&1 | head -20",
+            "description": "Runs TypeScript compiler after every file edit to catch type errors immediately"
+          },
+          {
+            "name": "test",
+            "trigger": "PostToolUse",
+            "matcher": "Write|Edit",
+            "command": "npm test -- --findRelatedTests $CLAUDE_FILE_PATHS --passWithNoTests 2>&1 | tail -10",
+            "description": "Runs tests for changed files after every edit to catch logic errors immediately"
+          }
+        ],
+        "description": "Hooks run automatically after EVERY file edit during execution, providing immediate feedback on technical correctness. This prevents compounding errors and allows executor to fix issues before moving to next step."
+      },
+      "tdd_workflow": {
+        "description": "Executor follows TDD cycle for each step in the phase",
+        "steps": [
+          "1. Read step requirements and test specifications from implementation-plan.md",
+          "2. Write failing test(s) first (RED)",
+          "3. Run tests to verify they fail (hooks run automatically)",
+          "4. Write minimal implementation to pass tests (GREEN)",
+          "5. Run tests to verify they pass (hooks run automatically)",
+          "6. Refactor if needed while keeping tests passing",
+          "7. Update status-update.md to mark step complete",
+          "8. Move to next step in phase",
+          "9. Repeat until all steps in phase complete"
+        ]
+      },
       "success_criteria": [
-        "Step implementation complete",
-        "Tests pass (if applicable)",
-        "status-update.md updated with timestamp"
+        "All steps in assigned phase implemented",
+        "All tests written before implementation (TDD)",
+        "TypeScript compilation clean (validated by hooks)",
+        "All tests passing (validated by hooks)",
+        "status-update.md updated with timestamps for each step"
       ],
       "failure_handling": {
         "action": "report_blocker",
-        "notify": "user",
-        "stop_workflow": true
+        "notify": "orchestrator",
+        "stop_workflow": true,
+        "description": "If executor encounters blocker (unclear requirements, missing dependencies, etc.), report to orchestrator immediately"
       }
     },
     "build-checker": {
       "agent": "build-checker",
-      "description": "Verifies implementation quality and correctness",
+      "description": "Verifies ENTIRE PHASE for architectural quality, golden path compliance, and integration correctness. Does NOT check TypeScript or tests (hooks already validated those).",
       "depends_on": ["build-executor"],
+      "execution_scope": "phase",
       "inputs": {
         "required": [
           {
-            "type": "files",
-            "description": "Files changed by build-executor",
-            "from_node": "build-executor"
+            "type": "file",
+            "path": "{feature_root}/implementation-plan.md",
+            "description": "What should have been built",
+            "from_node": "build-planner"
           },
           {
             "type": "file",
             "path": "{feature_root}/status-update.md",
-            "description": "Current status",
+            "description": "What executor claims was built",
             "from_node": "build-executor"
+          },
+          {
+            "type": "files",
+            "description": "Actual code files changed in the phase",
+            "from_node": "build-executor",
+            "access_method": "git_diff"
+          },
+          {
+            "type": "directory",
+            "path": "{architecture}/*",
+            "description": "Architecture standards for compliance checking"
+          },
+          {
+            "type": "directory",
+            "path": "{golden_paths}/*",
+            "description": "Coding standards and patterns for compliance checking"
           }
         ]
       },
       "outputs": [
         {
-          "type": "validation_result",
-          "description": "Quality check results (pass/fail)"
-        },
-        {
           "type": "file",
-          "path": "{feature_root}/status-update.md",
-          "description": "Updated with verification results",
-          "update_type": "append"
+          "path": "{feature_root}/verification-phase-{phase_number}.md",
+          "description": "Verification report with PASS/FAIL status and detailed feedback",
+          "format": {
+            "status": "PASS | FAIL",
+            "issues_found": "List of architectural or pattern violations",
+            "required_fixes": "Specific actionable fixes if FAIL",
+            "architectural_feedback": "General observations and suggestions"
+          }
         }
       ],
+      "validation_focus": {
+        "architecture_compliance": [
+          "Layering respected (no UI in services, no business logic in API routes)",
+          "Dependency directions correct (services don't import from UI)",
+          "Separation of concerns maintained",
+          "Integration points clean and well-defined"
+        ],
+        "golden_path_adherence": [
+          "Naming conventions followed",
+          "File structure matches patterns",
+          "Error handling follows standards",
+          "API patterns consistent with golden paths"
+        ],
+        "integration_quality": [
+          "Steps in phase work together cohesively",
+          "No duplicate code that should be shared",
+          "Interfaces between steps are clean",
+          "Data flow makes sense"
+        ],
+        "code_organization": [
+          "Proper file locations",
+          "Clean exports/imports",
+          "Logical grouping of functionality"
+        ]
+      },
+      "does_not_check": [
+        "TypeScript compilation errors (hooks already validated)",
+        "Test failures (hooks already validated)",
+        "Syntax errors (hooks already validated)"
+      ],
       "success_criteria": [
-        "Code quality verified",
-        "Tests passing",
-        "No critical issues found"
+        "Architecture principles followed",
+        "Golden paths adhered to",
+        "Code integrates well within phase",
+        "No critical design issues",
+        "Report written with clear PASS/FAIL"
       ],
       "failure_handling": {
         "action": "return_to_executor",
         "with_feedback": true,
-        "max_iterations": 5
+        "max_iterations": 5,
+        "description": "If checker finds issues, write detailed feedback in verification report. Executor will be called again to fix specific issues."
       }
     }
   },
@@ -216,14 +312,27 @@
       "build-planner",
       {
         "loop": {
+          "type": "phase_level",
           "nodes": ["build-executor", "build-checker"],
           "condition": {
             "type": "script",
-            "script": "python .claude/hooks/check-build-completion.py",
-            "continue_if": "exit_code == 1",
-            "exit_if": "exit_code == 0"
+            "script": "python .claude/hooks/check-phase-completion.py",
+            "args": ["{feature_id}"],
+            "continue_if": "exit_code == 0 and more_phases_remaining",
+            "exit_if": "exit_code == 0 and all_phases_complete",
+            "retry_phase_if": "exit_code == 1"
           },
-          "description": "Execute and verify steps until all complete"
+          "granularity": "phase",
+          "description": "Execute and verify ONE ENTIRE PHASE at a time. Executor implements all steps in phase, checker reviews architectural quality of completed phase. Loop until all phases complete.",
+          "loop_logic": {
+            "1": "Identify next incomplete phase from status-update.md",
+            "2": "Delegate to build-executor: implement entire phase (all steps)",
+            "3": "Delegate to build-checker: review entire phase architecture",
+            "4": "Run check-phase-completion.py to read verification report",
+            "5a": "If PASS and more phases: continue loop (next phase)",
+            "5b": "If PASS and all done: exit loop (workflow complete)",
+            "5c": "If FAIL: executor fixes phase based on checker feedback, return to checker"
+          }
         }
       }
     ]
@@ -233,27 +342,52 @@
       "after_node": "context-gatherer",
       "type": "automated",
       "script": "python .claude/hooks/build-context-verification.py",
-      "block_on_failure": true
+      "block_on_failure": true,
+      "description": "Validates project-context.md has required sections before planning begins"
     },
     {
       "after_node": "build-planner",
       "type": "automated",
       "script": "python .claude/hooks/build-plan-verification.py",
-      "block_on_failure": true
+      "block_on_failure": true,
+      "description": "Validates implementation-plan.md structure and test specifications before execution begins"
+    },
+    {
+      "after_node": "build-executor",
+      "type": "continuous",
+      "hooks": ["typecheck", "test"],
+      "description": "PostToolUse hooks run after every file edit to validate TypeScript and tests immediately"
+    },
+    {
+      "after_node": "build-checker",
+      "type": "automated",
+      "script": "python .claude/hooks/check-phase-completion.py",
+      "block_on_failure": false,
+      "description": "Reads verification report to determine if phase passed and whether to continue to next phase or retry current phase"
     }
   ],
   "orchestration_rules": {
     "sequential_execution": true,
-    "description": "Each node completes before next starts",
+    "description": "Each node completes before next starts, except for phase loop where executor and checker iterate until phase passes",
     "validation_gates_required": true,
     "max_retries_per_node": 3,
+    "max_retries_per_phase": 5,
     "stop_on_blocker": true,
-    "loop_max_iterations": 50
+    "loop_max_iterations": 50,
+    "tdd_required": true,
+    "phase_level_execution": true
   },
   "metadata": {
     "created": "2025-01-15",
     "last_updated": "2025-01-15",
     "author": "build-flow-team",
-    "version_notes": "Initial DAG structure for build workflow"
+    "version_notes": "Phase-level loop with TDD, continuous validation via hooks, architectural review per phase",
+    "key_insights": [
+      "Phase-level execution prevents compounding errors while maintaining efficiency",
+      "Hooks provide continuous technical validation (TypeScript, tests)",
+      "Checker focuses on architectural review, not technical validation",
+      "TDD ensures tests are written before implementation",
+      "Big picture context (full plan + project context) prevents narrow implementation"
+    ]
   }
 }
