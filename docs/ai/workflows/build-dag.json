@@ -1,0 +1,259 @@
+{
+  "name": "build-flow",
+  "version": "1.0.0",
+  "description": "End-to-end workflow for building new features from unstructured plans",
+  "entry_point": "context-gatherer",
+  "parameters": {
+    "feature_id": {
+      "type": "string",
+      "description": "Unique identifier for the feature being built (kebab-case)",
+      "required": true,
+      "example": "user-dashboard"
+    }
+  },
+  "base_paths": {
+    "feature_root": "docs/ai/features/{feature_id}",
+    "architecture": "docs/ai/project-wide/architecture.md",
+    "golden_paths": "docs/ai/project-wide/golden-path.md"
+  },
+  "nodes": {
+    "context-gatherer": {
+      "agent": "build-context-gatherer",
+      "description": "Gathers project-specific context from architecture docs, golden paths, and project files",
+      "depends_on": [],
+      "inputs": {
+        "required": [
+          {
+            "type": "file",
+            "path": "{feature_root}/unstructured-plan.md",
+            "description": "User's original plan from chat LLM"
+          },
+          {
+            "type": "file",
+            "path": "CLAUDE.md",
+            "description": "Project essentials"
+          }
+        ],
+        "optional": [
+          {
+            "type": "directory",
+            "path": "{architecture}/*",
+            "description": "Architecture documentation"
+          },
+          {
+            "type": "directory",
+            "path": "{golden_paths}/*",
+            "description": "Code standards and patterns"
+          },
+          {
+            "type": "file",
+            "path": "package.json",
+            "description": "Tech stack information"
+          },
+          {
+            "type": "file",
+            "path": "README.md",
+            "description": "Project overview"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "type": "file",
+          "path": "{feature_root}/project-context.md",
+          "description": "Structured context about the project",
+          "validation": {
+            "script": "python .claude/hooks/build-context-verification.py",
+            "required_sections": [
+              "Tech Stack",
+              "Architecture",
+              "Conventions",
+              "Key Files"
+            ]
+          }
+        }
+      ],
+      "retry_policy": {
+        "max_attempts": 3,
+        "on_failure": "regenerate_with_corrections"
+      }
+    },
+    "build-planner": {
+      "agent": "build-planner",
+      "description": "Converts unstructured plan into phased implementation plan with specific steps",
+      "depends_on": ["context-gatherer"],
+      "inputs": {
+        "required": [
+          {
+            "type": "file",
+            "path": "{feature_root}/project-context.md",
+            "description": "Context from context-gatherer",
+            "from_node": "context-gatherer"
+          },
+          {
+            "type": "file",
+            "path": "{feature_root}/unstructured-plan.md",
+            "description": "User's original plan"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "type": "file",
+          "path": "{feature_root}/implementation-plan.md",
+          "description": "Structured phased plan with steps",
+          "validation": {
+            "script": "python .claude/hooks/build-plan-verification.py",
+            "requirements": [
+              "At least one phase",
+              "Each phase has steps",
+              "Steps are numbered sequentially",
+              "Has overview section"
+            ]
+          }
+        },
+        {
+          "type": "file",
+          "path": "{feature_root}/status-update.md",
+          "description": "Initial progress tracking file"
+        }
+      ],
+      "retry_policy": {
+        "max_attempts": 3,
+        "on_failure": "regenerate_with_corrections"
+      }
+    },
+    "build-executor": {
+      "agent": "build-executor",
+      "description": "Implements individual steps from the plan",
+      "depends_on": ["build-planner"],
+      "inputs": {
+        "required": [
+          {
+            "type": "file",
+            "path": "{feature_root}/implementation-plan.md",
+            "description": "The full implementation plan",
+            "from_node": "build-planner"
+          },
+          {
+            "type": "file",
+            "path": "{feature_root}/status-update.md",
+            "description": "Current progress status",
+            "from_node": "build-planner"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "type": "files",
+          "pattern": "**/*",
+          "description": "Modified source files implementing the step"
+        },
+        {
+          "type": "file",
+          "path": "{feature_root}/status-update.md",
+          "description": "Updated with step completion",
+          "update_type": "append"
+        }
+      ],
+      "success_criteria": [
+        "Step implementation complete",
+        "Tests pass (if applicable)",
+        "status-update.md updated with timestamp"
+      ],
+      "failure_handling": {
+        "action": "report_blocker",
+        "notify": "user",
+        "stop_workflow": true
+      }
+    },
+    "build-checker": {
+      "agent": "build-checker",
+      "description": "Verifies implementation quality and correctness",
+      "depends_on": ["build-executor"],
+      "inputs": {
+        "required": [
+          {
+            "type": "files",
+            "description": "Files changed by build-executor",
+            "from_node": "build-executor"
+          },
+          {
+            "type": "file",
+            "path": "{feature_root}/status-update.md",
+            "description": "Current status",
+            "from_node": "build-executor"
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "type": "validation_result",
+          "description": "Quality check results (pass/fail)"
+        },
+        {
+          "type": "file",
+          "path": "{feature_root}/status-update.md",
+          "description": "Updated with verification results",
+          "update_type": "append"
+        }
+      ],
+      "success_criteria": [
+        "Code quality verified",
+        "Tests passing",
+        "No critical issues found"
+      ],
+      "failure_handling": {
+        "action": "return_to_executor",
+        "with_feedback": true,
+        "max_iterations": 5
+      }
+    }
+  },
+  "workflow": {
+    "execution_order": [
+      "context-gatherer",
+      "build-planner",
+      {
+        "loop": {
+          "nodes": ["build-executor", "build-checker"],
+          "condition": {
+            "type": "script",
+            "script": "python .claude/hooks/check-build-completion.py",
+            "continue_if": "exit_code == 1",
+            "exit_if": "exit_code == 0"
+          },
+          "description": "Execute and verify steps until all complete"
+        }
+      }
+    ]
+  },
+  "validation_gates": [
+    {
+      "after_node": "context-gatherer",
+      "type": "automated",
+      "script": "python .claude/hooks/build-context-verification.py",
+      "block_on_failure": true
+    },
+    {
+      "after_node": "build-planner",
+      "type": "automated",
+      "script": "python .claude/hooks/build-plan-verification.py",
+      "block_on_failure": true
+    }
+  ],
+  "orchestration_rules": {
+    "sequential_execution": true,
+    "description": "Each node completes before next starts",
+    "validation_gates_required": true,
+    "max_retries_per_node": 3,
+    "stop_on_blocker": true,
+    "loop_max_iterations": 50
+  },
+  "metadata": {
+    "created": "2025-01-15",
+    "last_updated": "2025-01-15",
+    "author": "build-flow-team",
+    "version_notes": "Initial DAG structure for build workflow"
+  }
+}
