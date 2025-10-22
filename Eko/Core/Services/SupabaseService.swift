@@ -863,6 +863,7 @@ final class SupabaseService: @unchecked Sendable {
         request.setValue(Config.Supabase.anonKey, forHTTPHeaderField: "apikey")
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 30
 
         // Make request
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -871,8 +872,15 @@ final class SupabaseService: @unchecked Sendable {
             throw NSError(domain: "SupabaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response type"])
         }
 
+        print("📥 Edge Function response status: \(httpResponse.statusCode)")
+        print("📥 Response data size: \(data.count) bytes")
+        if let jsonString = String(data: data, encoding: .utf8) {
+            print("📥 Response JSON: \(jsonString)")
+        }
+
         // Decode response (handle both success and error states)
         let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode(GetDailyActivityResponse.self, from: data)
     }
 
@@ -985,4 +993,78 @@ final class SupabaseService: @unchecked Sendable {
         let decoder = JSONDecoder()
         return try decoder.decode(CompleteActivityResponse.self, from: data)
     }
+
+    // MARK: - Daily Practice Debug/Testing Methods
+
+    #if DEBUG
+    /// Reset daily practice progress - DEBUG ONLY
+    /// - Parameter resetAll: If true, resets all progress. If false, resets current day only.
+    func resetDailyPractice(resetAll: Bool = false) async throws {
+        let session = try await authClient.session
+        let accessToken = session.accessToken
+
+        // Create request body
+        let body: [String: Any] = [
+            "resetType": resetAll ? "all" : "current"
+        ]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+
+        // Create request
+        var request = URLRequest(url: baseURL.appendingPathComponent("functions/v1/reset-daily-practice"))
+        request.httpMethod = "POST"
+        request.setValue(Config.Supabase.anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = bodyData
+
+        // Make request
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NSError(domain: "SupabaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response type"])
+        }
+
+        guard httpResponse.statusCode == 200 else {
+            let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw NSError(domain: "SupabaseService", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: errorMessage])
+        }
+
+        print("✅ [Daily Practice] Reset successful")
+    }
+
+    /// Get a specific activity by day number - DEBUG ONLY
+    /// - Parameter dayNumber: The day number to fetch
+    func getActivityByDay(_ dayNumber: Int) async throws -> GetDailyActivityResponse {
+        let session = try await authClient.session
+        let accessToken = session.accessToken
+
+        // Create request body
+        let body: [String: Any] = [
+            "dayNumber": dayNumber
+        ]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+
+        // Create request
+        var request = URLRequest(url: baseURL.appendingPathComponent("functions/v1/get-activity-by-day"))
+        request.httpMethod = "POST"
+        request.setValue(Config.Supabase.anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = bodyData
+
+        // Make request
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NSError(domain: "SupabaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response type"])
+        }
+
+        print("📥 Edge Function response status: \(httpResponse.statusCode)")
+
+        // Decode response
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(GetDailyActivityResponse.self, from: data)
+    }
+    #endif
 }

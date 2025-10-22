@@ -78,4 +78,61 @@ final class DailyPracticeHomeViewModel {
     func retry() async {
         await loadTodayActivity()
     }
+
+    // MARK: - Debug/Testing Methods
+
+    #if DEBUG
+    /// Reset daily practice progress (current day only) - DEBUG ONLY
+    func resetCurrentDay() async {
+        do {
+            try await supabase.resetDailyPractice(resetAll: false)
+            // Reload after reset
+            await loadTodayActivity()
+        } catch {
+            print("❌ [DailyPracticeHome] Error resetting: \(error)")
+            loadingState = .error(error.localizedDescription)
+        }
+    }
+
+    /// Reset all daily practice progress - DEBUG ONLY
+    func resetAllProgress() async {
+        do {
+            try await supabase.resetDailyPractice(resetAll: true)
+            // Reload after reset
+            await loadTodayActivity()
+        } catch {
+            print("❌ [DailyPracticeHome] Error resetting all: \(error)")
+            loadingState = .error(error.localizedDescription)
+        }
+    }
+
+    /// Load a specific day for testing - DEBUG ONLY
+    func loadDay(_ dayNumber: Int) async {
+        loadingState = .loading
+
+        do {
+            let response = try await supabase.getActivityByDay(dayNumber)
+
+            // Handle not found
+            if let error = response.error, error == "not_found" {
+                loadingState = .error("No activity found for day \(dayNumber)")
+                return
+            }
+
+            // Handle success
+            if let activity = response.activity, let dayNumber = response.dayNumber {
+                self.activity = activity
+                self.dayNumber = dayNumber
+                self.lastCompletedDay = response.userProgress?.lastCompleted ?? 0
+                loadingState = .loaded
+            } else {
+                loadingState = .error("Unexpected response format")
+            }
+
+        } catch {
+            print("❌ [DailyPracticeHome] Error loading day \(dayNumber): \(error)")
+            loadingState = .error(error.localizedDescription)
+        }
+    }
+    #endif
 }

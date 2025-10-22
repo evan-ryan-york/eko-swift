@@ -328,13 +328,20 @@ public struct ActionableTakeaway: Codable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case toolName = "tool_name"
-        case toolType = "tool_type"
-        case whenToUse = "when_to_use"
-        case howTo = "how_to"
-        case whyItWorks = "why_it_works"
-        case tryItWhen = "try_it_when"
-        case example
+        case toolName, toolType, whenToUse, howTo, whyItWorks, tryItWhen, example
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        // Try camelCase first (database structure format), fallback to snake_case
+        self.toolName = try container.decode(String.self, forKey: .toolName)
+        self.toolType = try? container.decode(String.self, forKey: .toolType)
+        self.whenToUse = try container.decode(String.self, forKey: .whenToUse)
+        self.howTo = try container.decode([String].self, forKey: .howTo)
+        self.whyItWorks = try container.decode(String.self, forKey: .whyItWorks)
+        self.tryItWhen = try? container.decode(String.self, forKey: .tryItWhen)
+        self.example = try container.decode(TakeawayExample.self, forKey: .example)
     }
 }
 

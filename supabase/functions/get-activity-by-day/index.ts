@@ -1,5 +1,5 @@
-// Daily Practice - Get Daily Activity Edge Function
-// Fetches the next available daily practice activity for the authenticated user
+// Get Activity by Day - DEBUG/DEVELOPMENT ONLY
+// Fetches a specific daily practice activity by day number (for testing)
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -17,7 +17,7 @@ serve(async (req) => {
   }
 
   try {
-    console.log('🚀 get-daily-activity function started')
+    console.log('🎯 get-activity-by-day function started')
 
     // Get authorization header
     const authHeader = req.headers.get('Authorization')
@@ -29,11 +29,10 @@ serve(async (req) => {
       )
     }
 
-    // Initialize Supabase client with user's JWT
+    // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!
 
-    console.log('🔧 Creating Supabase client')
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
         headers: {
@@ -43,7 +42,6 @@ serve(async (req) => {
     })
 
     // Get authenticated user
-    console.log('🔐 Authenticating user')
     const { data: { user }, error: authError } = await supabase.auth.getUser()
 
     if (authError || !user) {
@@ -56,59 +54,40 @@ serve(async (req) => {
 
     console.log('✅ User authenticated:', user.id)
 
-    // Fetch user profile
-    console.log('📊 Fetching user profile for:', user.id)
-    const { data: userData, error: userError} = await supabase
+    // Get day number from request body
+    const body = await req.json()
+    const requestedDay = body.dayNumber
+
+    if (!requestedDay || requestedDay < 1) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid day number' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    console.log('📅 Requested day:', requestedDay)
+
+    // Get user profile for current progress
+    const { data: userData, error: userError } = await supabase
       .from('user_profiles')
-      .select('last_completed_daily_practice_activity, last_daily_practice_activity_completed_at')
+      .select('last_completed_daily_practice_activity')
       .eq('id', user.id)
       .single()
 
-    console.log('📊 User profile fetched:', userData ? 'success' : 'failed', userError?.message || '')
+    if (userError) {
+      console.error('Error fetching user:', userError)
+      throw userError
+    }
 
-    // Get child IDs from children table
+    // Get child age band
+    let ageBand = '6-9' // Default
+
     const { data: children } = await supabase
       .from('children')
       .select('id, birthday')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(1)
-
-    if (userError) {
-      console.error('Error fetching user:', userError)
-      return new Response(
-        JSON.stringify({ error: 'Failed to fetch user data', details: userError.message }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // Check if completed today (UTC date comparison)
-    const now = new Date()
-    const todayUTC = now.toISOString().split('T')[0]
-
-    if (userData.last_daily_practice_activity_completed_at) {
-      const completionDate = new Date(userData.last_daily_practice_activity_completed_at)
-        .toISOString().split('T')[0]
-
-      if (completionDate === todayUTC) {
-        return new Response(
-          JSON.stringify({
-            error: 'already_completed',
-            message: 'Daily practice already completed today',
-            last_completed: userData.last_completed_daily_practice_activity,
-            completed_at: userData.last_daily_practice_activity_completed_at
-          }),
-          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
-    }
-
-    // Calculate next day
-    const nextDay = (userData.last_completed_daily_practice_activity || 0) + 1
-    console.log('📅 Next day to fetch:', nextDay)
-
-    // Get child age band
-    let ageBand = '6-9' // Default
 
     if (children && children.length > 0) {
       const child = children[0]
@@ -117,14 +96,15 @@ serve(async (req) => {
         ageBand = mapAgeToAgeBand(age)
       }
     }
+
     console.log('👶 Age band:', ageBand)
 
-    // Fetch activity from single table with JSONB columns
-    console.log('🎯 Fetching activity for day', nextDay, 'age band', ageBand)
+    // Fetch the specific activity
+    console.log('🎯 Fetching activity for day', requestedDay, 'age band', ageBand)
     const { data: activity, error: activityError } = await supabase
       .from('daily_practice_activities')
       .select('*')
-      .eq('day_number', nextDay)
+      .eq('day_number', requestedDay)
       .eq('age_band', ageBand)
       .single()
 
@@ -134,30 +114,30 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({
           error: 'not_found',
-          message: `No activity available for day ${nextDay}`,
-          day_number: nextDay
+          message: `No activity available for day ${requestedDay}`,
+          day_number: requestedDay
         }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    // Activity already contains prompts and actionable_takeaway as JSONB
-    // Just return it directly
-    console.log('✅ Returning activity with', activity.prompts?.length || 0, 'prompts')
+    // Return the activity (even if user has already completed it - this is for testing)
+    console.log('✅ Returning activity for testing')
     return new Response(
       JSON.stringify({
-        day_number: nextDay,
+        day_number: requestedDay,
         activity: activity,
         user_progress: {
           last_completed: userData.last_completed_daily_practice_activity || 0,
-          current_day: nextDay
-        }
+          current_day: requestedDay
+        },
+        debug_mode: true
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
 
   } catch (error) {
-    console.error('Error in get-daily-activity function:', error)
+    console.error('Error in get-activity-by-day function:', error)
     return new Response(
       JSON.stringify({ error: error.message || 'Internal server error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
