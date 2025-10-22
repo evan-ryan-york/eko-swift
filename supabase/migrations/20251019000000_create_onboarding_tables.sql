@@ -13,20 +13,27 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Add constraint for valid onboarding states
-ALTER TABLE user_profiles
-ADD CONSTRAINT valid_onboarding_state CHECK (
-    onboarding_state IN (
-        'NOT_STARTED',
-        'USER_INFO',
-        'CHILD_INFO',
-        'GOALS',
-        'TOPICS',
-        'DISPOSITIONS',
-        'REVIEW',
-        'COMPLETE'
-    )
-);
+-- Add constraint for valid onboarding states (if not exists)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'valid_onboarding_state'
+    ) THEN
+        ALTER TABLE user_profiles
+        ADD CONSTRAINT valid_onboarding_state CHECK (
+            onboarding_state IN (
+                'NOT_STARTED',
+                'USER_INFO',
+                'CHILD_INFO',
+                'GOALS',
+                'TOPICS',
+                'DISPOSITIONS',
+                'REVIEW',
+                'COMPLETE'
+            )
+        );
+    END IF;
+END$$;
 
 -- Create index for fast lookups
 CREATE INDEX IF NOT EXISTS idx_user_profiles_onboarding_state
@@ -55,12 +62,22 @@ ADD COLUMN IF NOT EXISTS temperament_talkative INTEGER DEFAULT 5,
 ADD COLUMN IF NOT EXISTS temperament_sensitivity INTEGER DEFAULT 5,
 ADD COLUMN IF NOT EXISTS temperament_accountability INTEGER DEFAULT 5;
 
--- Add validation constraints
-ALTER TABLE children
-ADD CONSTRAINT valid_birthday CHECK (birthday <= CURRENT_DATE),
-ADD CONSTRAINT valid_temperament_talkative CHECK (temperament_talkative BETWEEN 1 AND 10),
-ADD CONSTRAINT valid_temperament_sensitivity CHECK (temperament_sensitivity BETWEEN 1 AND 10),
-ADD CONSTRAINT valid_temperament_accountability CHECK (temperament_accountability BETWEEN 1 AND 10);
+-- Add validation constraints (if not exists)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'valid_birthday') THEN
+        ALTER TABLE children ADD CONSTRAINT valid_birthday CHECK (birthday <= CURRENT_DATE);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'valid_temperament_talkative') THEN
+        ALTER TABLE children ADD CONSTRAINT valid_temperament_talkative CHECK (temperament_talkative BETWEEN 1 AND 10);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'valid_temperament_sensitivity') THEN
+        ALTER TABLE children ADD CONSTRAINT valid_temperament_sensitivity CHECK (temperament_sensitivity BETWEEN 1 AND 10);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'valid_temperament_accountability') THEN
+        ALTER TABLE children ADD CONSTRAINT valid_temperament_accountability CHECK (temperament_accountability BETWEEN 1 AND 10);
+    END IF;
+END$$;
 
 COMMENT ON COLUMN children.birthday IS 'Child''s date of birth (ISO date)';
 COMMENT ON COLUMN children.goals IS 'Parent conversation goals (1-3 items from onboarding)';
@@ -98,14 +115,17 @@ COMMENT ON FUNCTION create_user_profile IS 'Automatically creates user_profile r
 
 ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view own profile" ON user_profiles;
 CREATE POLICY "Users can view own profile"
 ON user_profiles FOR SELECT
 USING (auth.uid() = id);
 
+DROP POLICY IF EXISTS "Users can insert own profile" ON user_profiles;
 CREATE POLICY "Users can insert own profile"
 ON user_profiles FOR INSERT
 WITH CHECK (auth.uid() = id);
 
+DROP POLICY IF EXISTS "Users can update own profile" ON user_profiles;
 CREATE POLICY "Users can update own profile"
 ON user_profiles FOR UPDATE
 USING (auth.uid() = id)

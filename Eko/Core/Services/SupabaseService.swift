@@ -12,6 +12,11 @@ import struct EkoCore.CreateRealtimeSessionDTO
 import struct EkoCore.RealtimeSessionResponse
 import enum EkoCore.OnboardingState
 import struct EkoCore.UserProfile
+import struct EkoCore.DailyPracticeActivity
+import struct EkoCore.GetDailyActivityResponse
+import struct EkoCore.CompleteActivityResponse
+import struct EkoCore.SessionResponse
+import struct EkoCore.PromptResult
 import Auth
 import PostgREST
 import Functions
@@ -844,4 +849,222 @@ final class SupabaseService: @unchecked Sendable {
             .eq("id", value: id.uuidString)
             .execute()
     }
+
+    // MARK: - Daily Practice
+
+    /// Fetch today's daily practice activity
+    func getTodayActivity() async throws -> GetDailyActivityResponse {
+        let session = try await authClient.session
+        let accessToken = session.accessToken
+
+        // Create request
+        var request = URLRequest(url: baseURL.appendingPathComponent("functions/v1/get-daily-activity"))
+        request.httpMethod = "POST"
+        request.setValue(Config.Supabase.anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 30
+
+        // Make request
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NSError(domain: "SupabaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response type"])
+        }
+
+        print("📥 Edge Function response status: \(httpResponse.statusCode)")
+        print("📥 Response data size: \(data.count) bytes")
+        if let jsonString = String(data: data, encoding: .utf8) {
+            print("📥 Response JSON: \(jsonString)")
+        }
+
+        // Decode response (handle both success and error states)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(GetDailyActivityResponse.self, from: data)
+    }
+
+    /// Start a practice session (non-blocking analytics)
+    func startSession(activityId: UUID, dayNumber: Int) async -> UUID? {
+        do {
+            let session = try await authClient.session
+            let accessToken = session.accessToken
+
+            // Create request body
+            let body: [String: Any] = [
+                "activityId": activityId.uuidString,
+                "dayNumber": dayNumber
+            ]
+            let bodyData = try JSONSerialization.data(withJSONObject: body)
+
+            // Create request
+            var request = URLRequest(url: baseURL.appendingPathComponent("functions/v1/start-practice-session"))
+            request.httpMethod = "POST"
+            request.setValue(Config.Supabase.anonKey, forHTTPHeaderField: "apikey")
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = bodyData
+
+            // Make request and decode response
+            let (data, _) = try await URLSession.shared.data(for: request)
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            let response = try decoder.decode(SessionResponse.self, from: data)
+
+            return response.sessionId
+        } catch {
+            print("⚠️ [Daily Practice] Failed to start session (non-critical): \(error)")
+            return nil
+        }
+    }
+
+    /// Update prompt result (non-blocking analytics)
+    func updatePromptResult(sessionId: UUID?, promptResult: PromptResult) async {
+        guard let sessionId = sessionId else { return }
+
+        do {
+            let session = try await authClient.session
+            let accessToken = session.accessToken
+
+            // Create request body
+            let encoder = JSONEncoder()
+            let promptData = try encoder.encode(promptResult)
+            let promptObject = try JSONSerialization.jsonObject(with: promptData)
+
+            let body: [String: Any] = [
+                "sessionId": sessionId.uuidString,
+                "promptResult": promptObject
+            ]
+            let bodyData = try JSONSerialization.data(withJSONObject: body)
+
+            // Create request
+            var request = URLRequest(url: baseURL.appendingPathComponent("functions/v1/update-prompt-result"))
+            request.httpMethod = "POST"
+            request.setValue(Config.Supabase.anonKey, forHTTPHeaderField: "apikey")
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = bodyData
+
+            // Make request (ignore errors - this is analytics only)
+            _ = try await URLSession.shared.data(for: request)
+        } catch {
+            print("⚠️ [Daily Practice] Failed to update prompt result (non-critical): \(error)")
+        }
+    }
+
+    /// Complete activity (CRITICAL - must succeed)
+    func completeActivity(dayNumber: Int, totalScore: Int, sessionId: UUID?) async throws -> CompleteActivityResponse {
+        let session = try await authClient.session
+        let accessToken = session.accessToken
+
+        // Create request body
+        var body: [String: Any] = [
+            "dayNumber": dayNumber,
+            "totalScore": totalScore
+        ]
+
+        if let sessionId = sessionId {
+            body["sessionId"] = sessionId.uuidString
+        }
+
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+
+        // Create request
+        var request = URLRequest(url: baseURL.appendingPathComponent("functions/v1/complete-activity"))
+        request.httpMethod = "POST"
+        request.setValue(Config.Supabase.anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = bodyData
+
+        // Make request
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NSError(domain: "SupabaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response type"])
+        }
+
+        guard httpResponse.statusCode == 200 else {
+            let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw NSError(domain: "SupabaseService", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: errorMessage])
+        }
+
+        // Decode response
+        let decoder = JSONDecoder()
+        return try decoder.decode(CompleteActivityResponse.self, from: data)
+    }
+
+    // MARK: - Daily Practice Debug/Testing Methods
+
+    #if DEBUG
+    /// Reset daily practice progress - DEBUG ONLY
+    /// - Parameter resetAll: If true, resets all progress. If false, resets current day only.
+    func resetDailyPractice(resetAll: Bool = false) async throws {
+        let session = try await authClient.session
+        let accessToken = session.accessToken
+
+        // Create request body
+        let body: [String: Any] = [
+            "resetType": resetAll ? "all" : "current"
+        ]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+
+        // Create request
+        var request = URLRequest(url: baseURL.appendingPathComponent("functions/v1/reset-daily-practice"))
+        request.httpMethod = "POST"
+        request.setValue(Config.Supabase.anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = bodyData
+
+        // Make request
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NSError(domain: "SupabaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response type"])
+        }
+
+        guard httpResponse.statusCode == 200 else {
+            let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw NSError(domain: "SupabaseService", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: errorMessage])
+        }
+
+        print("✅ [Daily Practice] Reset successful")
+    }
+
+    /// Get a specific activity by day number - DEBUG ONLY
+    /// - Parameter dayNumber: The day number to fetch
+    func getActivityByDay(_ dayNumber: Int) async throws -> GetDailyActivityResponse {
+        let session = try await authClient.session
+        let accessToken = session.accessToken
+
+        // Create request body
+        let body: [String: Any] = [
+            "dayNumber": dayNumber
+        ]
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+
+        // Create request
+        var request = URLRequest(url: baseURL.appendingPathComponent("functions/v1/get-activity-by-day"))
+        request.httpMethod = "POST"
+        request.setValue(Config.Supabase.anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = bodyData
+
+        // Make request
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NSError(domain: "SupabaseService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response type"])
+        }
+
+        print("📥 Edge Function response status: \(httpResponse.statusCode)")
+
+        // Decode response
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(GetDailyActivityResponse.self, from: data)
+    }
+    #endif
 }

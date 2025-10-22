@@ -31,6 +31,8 @@ Daily Practice is a core feature of Eko that helps parents build parenting skill
 
 ### Four-Bucket Content Model
 
+> **Note:** The four-bucket model is a content planning framework. All activities use the same database structure with an `activity_type` field to distinguish between types.
+
 **1. Foundations (Days 1-60+)**
 Core curriculum of 10 essential parenting modules everyone completes:
 - Module 1: The Conversation State Model
@@ -59,6 +61,8 @@ Spaced repetition activities that revisit Foundation concepts with new scenarios
 
 **4. Applied Scenarios (Unlimited)**
 Complex, multi-step scenarios that combine multiple tools and concepts
+
+*Activity types stored in database: `basic-scenario`, `spot-the-mistake`, `before-after-comparison`, `sequential-decision`, `skill-application`, `self-assessment`*
 
 ---
 
@@ -90,15 +94,17 @@ Immediate feedback that includes:
 **4. Actionable Takeaway (End of Activity)**
 One concrete tool they can use immediately:
 - Tool name (e.g., "Regulated Presence")
+- Tool type (e.g., "diagnostic", "technique", "framework")
 - When to use it
-- Step-by-step how-to
-- Real example in action
-- "Try it when..." specific situations
+- Why it works (research-backed explanation)
+- Step-by-step how-to (3-5 actionable steps)
+- Real example with situation → action → outcome
+- "Try it when..." specific situations (optional prompt)
 
 **5. Results Screen**
-- Total points earned
-- Module progress
-- Option to continue to next day (if available)
+- Celebration message ("Day X Complete!")
+- Total points earned for this activity
+- "Done" button returns to home screen
 
 ---
 
@@ -106,17 +112,21 @@ One concrete tool they can use immediately:
 
 To prevent monotony, activities use different interaction patterns:
 
-**Core Patterns (90% of days):**
+**Core Patterns:**
 - **State Identification:** "What state is your child in?"
 - **Best Response Selection:** "What should you do first?"
 - **Spot the Mistake:** "Where did this parent lose connection?"
-- **Sequential Decision Tree:** Branching choices where your first answer affects what happens next
+- **Sequential Choice:** Branching choices where your first answer affects what happens next
 - **Dialogue Completion:** "Fill in what you'd say next"
 - **Before/After Comparison:** "What's different in these two approaches?"
+- **What Happens Next:** "What will likely happen if you say X?"
 
-**Variety Patterns (10% of days):**
+**Variety Patterns:**
 - **Sequencing:** "Put these steps in order"
 - **Select All That Apply:** "Which responses show emotion coaching?"
+- **Text Input:** Open-ended written responses
+- **Rating Scale:** Rate on a scale (e.g., 1-5)
+- **Matching:** Match concepts with examples or outcomes
 - **Reflection:** Self-assessment questions (no wrong answers)
 
 All patterns share the same core UI (header, scenario, progress, feedback) but vary the question format to keep engagement high.
@@ -129,11 +139,12 @@ All patterns share the same core UI (header, scenario, progress, feedback) but v
 
 **Rules:**
 - **First correct answer:** Full points (typically 10)
-- **Second correct answer:** ~70% points (7 points)
-- **Third correct answer:** ~40% points (4 points)
-- **Fourth+ correct answer:** 0 points
 - **Wrong answers:** 0 points, but can retry
 - **Already-tried options:** Disabled to prevent random guessing
+- **Partial credit calculation:** Based on remaining untried options
+  - For 4-option prompts: 2nd attempt = 7 points (~70%), 3rd = 4 points (~40%), 4th = 0 points
+  - For 2-option prompts: No partial credit after first attempt (prevents guessing)
+  - Formula: `ceil(totalPoints × remainingOptions / (totalOptions - 1))`
 
 **Session Scoring:**
 - Each prompt worth 10 points
@@ -141,10 +152,10 @@ All patterns share the same core UI (header, scenario, progress, feedback) but v
 - Points accumulate across all days into user's total score
 
 **Why this works:**
-- Encourages thinking before answering (first attempt matters)
+- Encourages thinking before answering (first attempt matters most)
 - Doesn't punish learning (can retry wrong answers)
-- Provides partial credit (recognizes effort)
-- Prevents gaming (already-tried options disabled)
+- Provides partial credit proportional to effort (recognizes persistence)
+- Prevents gaming (already-tried options disabled, binary choices have no partial credit)
 
 ---
 
@@ -259,7 +270,13 @@ All patterns share the same core UI (header, scenario, progress, feedback) but v
 
 ## Future Enhancements
 
-**Post-MVP:**
+**Implemented (v1.0):**
+- ✅ 13 different interaction patterns for variety
+- ✅ Debug tools for developer testing
+- ✅ Analytics tracking for prompt-level insights
+
+**Planned (Post-MVP):**
+- **Module Progress Display:** Show "Module 3 of 10" on results screen
 - **Tool Library:** Saved collection of all tools learned, searchable by situation
 - **Custom Practice:** Choose specific modules to revisit
 - **Multi-child Support:** Different age bands for different children
@@ -267,6 +284,8 @@ All patterns share the same core UI (header, scenario, progress, feedback) but v
 - **Applied Scenarios:** Complex 10-minute scenarios combining multiple tools
 - **Voice-Based Scenarios:** Audio scenarios with verbal response practice
 - **Community Insights:** "87% of parents found this tool helpful for bedtime"
+- **Offline Support:** Cache activities for offline completion
+- **Continue to Next Day:** Button on results screen to immediately load next day's activity
 
 ---
 
@@ -295,22 +314,36 @@ All patterns share the same core UI (header, scenario, progress, feedback) but v
 ## Technical Architecture Summary
 
 **Client (Swift/SwiftUI):**
-- One flexible activity screen with multiple interaction patterns
-- Optimistic UI for feedback, server-authoritative for completion
-- Local state for session, server state for progress
-- Offline-capable scenario viewing (cached after fetch)
+- One flexible activity screen with multiple interaction patterns (13 types)
+- Component-based prompt rendering (SelectAllPromptView, SequencingPromptView, etc.)
+- Local state for session, server-authoritative for completion
+- Requires network connection (activities fetched on demand)
 
 **Server (Supabase):**
 - PostgreSQL database with JSONB for flexible prompt structures
-- Edge Functions for business logic (daily check, completion, scoring)
+  - `daily_practice_activities` table stores all activity data
+  - `daily_practice_results` table for analytics tracking
+  - User progress tracked in `user_profiles` table
+- Edge Functions for business logic:
+  - `get-daily-activity` - Fetches next available activity with UTC date checking
+  - `start-practice-session` - Creates analytics session
+  - `update-prompt-result` - Tracks detailed prompt attempts
+  - `complete-activity` - Marks completion and updates user progress
+  - `reset-daily-practice` - Debug tool for resetting progress (DEBUG only)
+  - `get-activity-by-day` - Debug tool for loading specific days (DEBUG only)
 - Row-level security for user data isolation
 - Real-time updates not required (daily cadence, not live)
 
+**Developer Tools (DEBUG builds only):**
+- Debug controls accessible via wrench icon in home screen
+- Reset current day or all progress
+- Load any specific day (1-60) for testing
+- All debug features compiled out in Release builds
+
 **Content Management:**
-- AI-assisted generation tool for creating activities
-- Templates per interaction pattern
-- Age-band variation generation
-- Quality review workflow before publishing
+- Activities stored as JSONB in database
+- Manual seeding via SQL migration files
+- Future: AI-assisted generation tool for creating activities
 
 ---
 
@@ -340,6 +373,11 @@ All patterns share the same core UI (header, scenario, progress, feedback) but v
 - Minimum: Days 1-14 (2 weeks) across all age bands = 42 activities
 - Recommended: Days 1-30 (1 month) = 90 activities
 - Ideal: Full Foundations (Days 1-60) = 180 activities
+
+**Current Status:**
+- Sample activities created for testing infrastructure
+- Content pipeline ready for scale production
+- System fully operational and awaiting content
 
 **Ongoing:**
 - Add 1-2 new days per week to stay ahead of power users
