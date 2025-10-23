@@ -44,17 +44,19 @@ Read `docs/ai/workflows/build-dag.json` for the complete dependency graph, input
    - Tell it the feature ID: `{feature-id}`
    - Tell it to read:
      - `docs/ai/features/{feature-id}/unstructured-plan.md`
-     - `docs/ai/architecture/*` 
+     - `docs/ai/architecture/*`
      - `docs/ai/golden-paths/*`
-     - `CLAUDE.md`, `package.json`, `README.md`, etc.
+     - `CLAUDE.md`, `README.md`, Xcode project files, etc.
    - Tell it to write context to: `docs/ai/features/{feature-id}/project-context.md`
 
 2. Wait for context-gatherer to finish
 
-3. **Automatic validation hook runs**: `build-context-verification.py`
-   - If fails: Hook blocks and shows error
-   - Fix: Re-run context-gatherer with corrections
-   - If passes: Continue
+3. **The validation hook runs AUTOMATICALLY** via SubagentStop hook
+   - Hook: `python3 .claude/hooks/build-context-verification.py {feature-id}`
+   - The hook runs automatically when the sub-agent completes (configured in .claude/settings.json)
+   - You will see the hook output in the response
+   - If the hook fails (exit 1): The error message will appear. Return to build-context-gatherer with corrections.
+   - If the hook passes (exit 0): You'll see success message. Proceed to next step.
 
 ### Step 3: Create Structured Plan
 
@@ -68,10 +70,12 @@ Read `docs/ai/workflows/build-dag.json` for the complete dependency graph, input
 
 2. Wait for build-planner to finish
 
-3. **Automatic validation hook runs**: `build-plan-verification.py`
-   - If fails: Hook blocks and shows error
-   - Fix: Re-run build-planner with corrections
-   - If passes: Continue
+3. **The validation hook runs AUTOMATICALLY** via SubagentStop hook
+   - Hook: `python3 .claude/hooks/build-plan-verification.py {feature-id}`
+   - The hook runs automatically when the sub-agent completes (configured in .claude/settings.json)
+   - You will see the hook output in the response
+   - If the hook fails (exit 1): The error message will appear. Return to build-planner with corrections.
+   - If the hook passes (exit 0): You'll see success message. Proceed to implementation loop.
 
 ### Step 4: Execute Implementation Loop (PHASE-LEVEL)
 
@@ -118,14 +122,28 @@ This is a **phase-level loop** - executor implements entire phases, checker revi
 5. **Wait for build-checker to complete**
    - Checker will write verification report with PASS/FAIL status
 
-6. **Check Phase Completion**: Run `python .claude/hooks/check-phase-completion.py {feature-id}`
-   - Script reads verification report for Phase {N}
-   - **Exit code 0 (phase passed, more phases remain)**: Continue to next phase (return to step 1)
-   - **Exit code 0 (all phases complete)**: All done, go to Step 5
-   - **Exit code 1 (phase failed verification)**: Return to step 2 with checker feedback:
-     - Re-delegate to build-executor with specific fixes needed
-     - Tell it to address issues from `verification-phase-{N}.md`
-     - After fixes, return to step 4 (checker reviews again)
+6. **Now, YOU (the orchestrator) MUST EXPLICITLY RUN the phase completion check**:
+   ```bash
+   python3 .claude/hooks/check-phase-completion.py {feature-id}
+   ```
+   - This script does NOT run automatically - you must run it via Bash tool
+   - The script reads status-update.md and verification-phase-{N}.md
+   - Check the script's exit code and output message
+
+   **Exit code 0 with "Phase {N} passed"**: Phase passed, more phases remain
+   - Continue to next phase (return to step 1)
+
+   **Exit code 0 with "All phases complete"**: All phases verified successfully
+   - Go to Step 5 (workflow complete)
+
+   **Exit code 1 with "Phase {N} failed"**: Phase failed verification
+   - Read `verification-phase-{N}.md` for specific issues
+   - Re-delegate to build-executor with fixes needed from verification report
+   - Tell it to address the issues found by the checker
+   - After fixes, return to step 4 (checker reviews the fixed phase again)
+
+   **Exit code 1 with "awaiting_verification"**: Phase implementation not complete
+   - Executor hasn't finished yet, wait for completion
 
 ### Step 5: Complete
 
@@ -171,26 +189,28 @@ The checker reviews **architectural quality** of the completed phase:
 
 ### Continuous Validation via Hooks
 
-Hooks run automatically after every file edit (configured in `.claude/settings.json`):
-- TypeScript compilation check
-- Test execution for changed files
-- Executor sees output immediately
+Hooks run automatically after every file edit by the build-executor (configured in `.claude/settings.json`):
+- Swift compilation check (`xcodebuild build`)
+- Test execution for changed files (`xcodebuild test`)
+- Executor sees output immediately after each Write/Edit tool use
 - Prevents technical errors from compounding
 
-This means checker can focus on **architectural review** only.
+These are NOT the Python validation scripts - these are the Swift compile/test hooks that run automatically during execution.
+
+This means build-checker can focus on **architectural review** only, since technical correctness (compilation, test pass/fail) is already validated by these hooks.
 
 ## Error Handling
 
 ### If Context Gathering Validation Fails
-- Hook will block automatically
-- Show error message from validation script
-- Re-run build-context-gatherer with corrections
+- SubagentStop hook runs automatically: `python3 .claude/hooks/build-context-verification.py`
+- If exit code is 1: You'll see error message in hook output
+- Re-delegate to build-context-gatherer with corrections from the error message
 - Max 3 retries before escalating to user
 
 ### If Plan Validation Fails
-- Hook will block automatically  
-- Show error message from validation script
-- Re-run build-planner with corrections
+- SubagentStop hook runs automatically: `python3 .claude/hooks/build-plan-verification.py`
+- If exit code is 1: You'll see error message in hook output
+- Re-delegate to build-planner with corrections from the error message
 - Max 3 retries before escalating to user
 
 ### If Build-Executor Encounters Blocker
@@ -202,12 +222,14 @@ This means checker can focus on **architectural review** only.
 - Do NOT proceed to build-checker
 
 ### If Build-Checker Finds Issues (Phase Failed)
-- check-phase-completion.py returns exit code 1
-- Read verification report for specific issues
-- Re-delegate to build-executor with feedback from checker
+- You (the orchestrator) explicitly run: `python3 .claude/hooks/check-phase-completion.py {feature-id}`
+- If it returns exit code 1 with "failed verification" message: Phase failed verification
+- Read the verification report at `docs/ai/features/{feature-id}/verification-phase-{N}.md`
+- Re-delegate to build-executor with detailed feedback from the verification report
+- Tell executor which specific issues to fix (from the verification report)
 - Executor fixes specific issues in the phase
-- Return to build-checker for re-verification
-- Loop until checker gives PASS
+- Return to build-checker for re-verification of same phase
+- Loop until check-phase-completion.py returns exit code 0 (checker gave PASS)
 - Max 5 iterations per phase before escalating to user
 
 ### If Check Script Fails to Run
@@ -244,14 +266,17 @@ These contain:
 
 1. **Feature isolation**: All artifacts for this feature live in `docs/ai/features/{feature-id}/`
 2. **No cross-contamination**: Don't mix multiple features in one workflow run
-3. **Trust the hooks**: TypeScript and test validation happens automatically via hooks
-4. **Phase-level execution**: Executor implements entire phases, not individual steps
-5. **Checker reviews architecture**: Don't ask checker to verify TypeScript or tests (hooks do that)
-6. **Follow the DAG**: Always respect dependencies in build-dag.json
-7. **Read verification reports**: check-phase-completion.py reads these to decide next action
-8. **Update status visibility**: status-update.md must always reflect current state
-9. **Big picture context**: Executor always has full plan and project context
-10. **TDD discipline**: Every step with logic must have tests written first
+3. **Trust the hooks**: Swift compilation (`xcodebuild build`) and test validation (`xcodebuild test`) happens automatically via PostToolUse hooks after every file edit during execution
+4. **Hook types**:
+   - **SubagentStop hooks** (automatic): Run when sub-agents complete (build-context-verification.py, build-plan-verification.py)
+   - **check-phase-completion.py** (manual): You must explicitly run this script via Bash after checker completes
+5. **Phase-level execution**: Executor implements entire phases, not individual steps
+6. **Checker reviews architecture**: Don't ask checker to verify Swift compilation or tests (hooks already did that continuously)
+7. **Follow the DAG**: Always respect dependencies in build-dag.json
+8. **Read verification reports**: You run check-phase-completion.py to read verification reports and decide next action
+9. **Update status visibility**: status-update.md must always reflect current state
+10. **Big picture context**: Executor always has full plan and project context
+11. **TDD discipline**: Every step with business logic must have tests written first
 
 ## Communication Examples
 

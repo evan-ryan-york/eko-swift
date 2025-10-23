@@ -36,6 +36,20 @@ private final class UserDefaultsStorage: AuthLocalStorage, @unchecked Sendable {
     }
 }
 
+// MARK: - AnyJSON Helper Extension
+private extension Dictionary where Key == String, Value == AnyJSON {
+    func stringValue(forKey key: String) -> String? {
+        guard let value = self[key] else { return nil }
+        // AnyJSON can contain string values - extract them safely
+        switch value {
+        case .string(let str):
+            return str
+        default:
+            return nil
+        }
+    }
+}
+
 // MARK: - Supabase Service
 @MainActor
 final class SupabaseService: @unchecked Sendable {
@@ -58,7 +72,8 @@ final class SupabaseService: @unchecked Sendable {
         self.authClient = AuthClient(
             url: url.appendingPathComponent("auth/v1"),
             headers: ["apikey": Config.Supabase.anonKey],
-            localStorage: UserDefaultsStorage()
+            localStorage: UserDefaultsStorage(),
+            logger: nil
         )
 
         // Initialize PostgREST client for database operations
@@ -99,6 +114,7 @@ final class SupabaseService: @unchecked Sendable {
             headers: [
                 "apikey": anonKey
             ],
+            logger: nil,
             fetch: { @Sendable [weak authClient, anonKey] request in
                 var authenticatedRequest = request
                 // Get the current session token and add it to headers
@@ -399,9 +415,9 @@ final class SupabaseService: @unchecked Sendable {
                 email: email,
                 createdAt: session.user.createdAt,
                 updatedAt: session.user.updatedAt,
-                displayName: session.user.userMetadata["full_name"] as? String,
+                displayName: session.user.userMetadata.stringValue(forKey: "full_name"),
                 avatarURL: {
-                    if let avatarString = session.user.userMetadata["avatar_url"] as? String {
+                    if let avatarString = session.user.userMetadata.stringValue(forKey: "avatar_url") {
                         return URL(string: avatarString)
                     }
                     return nil
@@ -436,9 +452,9 @@ final class SupabaseService: @unchecked Sendable {
             email: email,
             createdAt: authUser.createdAt,
             updatedAt: authUser.updatedAt,
-            displayName: authUser.userMetadata["full_name"] as? String,
+            displayName: authUser.userMetadata.stringValue(forKey: "full_name"),
             avatarURL: {
-                if let avatarString = authUser.userMetadata["avatar_url"] as? String {
+                if let avatarString = authUser.userMetadata.stringValue(forKey: "avatar_url") {
                     return URL(string: avatarString)
                 }
                 return nil
