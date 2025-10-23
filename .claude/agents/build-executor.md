@@ -73,69 +73,94 @@ For EACH step in your assigned phase, follow the TDD cycle:
 
 1. **Read step requirements**:
 ````markdown
-   - Step 2.1: Create User model in models/user.ts with validation 
-     (tests: models/user.test.ts - test email format, required fields, edge cases)
+   - Step 2.1: Create User model in Models/User.swift with validation
+     (tests: EkoTests/Models/UserTests.swift - test email format, required fields, edge cases)
 ````
 
 2. **RED - Write failing test(s) first**:
-````typescript
-   // models/user.test.ts
-   import { User } from './user';
-   
-   describe('User', () => {
-     it('should require email', () => {
-       expect(() => new User({ name: 'John' })).toThrow('Email is required');
-     });
-     
-     it('should validate email format', () => {
-       expect(() => new User({ email: 'invalid' })).toThrow('Invalid email');
-     });
-   });
+````swift
+   // EkoTests/Models/UserTests.swift
+   import XCTest
+   @testable import Eko
+
+   final class UserTests: XCTestCase {
+       func testUserRequiresEmail() {
+           // Arrange & Act
+           let user = User(name: "John", email: nil)
+
+           // Assert
+           XCTAssertFalse(user.isValid)
+           XCTAssertEqual(user.validationError, "Email is required")
+       }
+
+       func testUserValidatesEmailFormat() {
+           // Arrange & Act
+           let user = User(name: "John", email: "invalid")
+
+           // Assert
+           XCTAssertFalse(user.isValid)
+           XCTAssertEqual(user.validationError, "Invalid email format")
+       }
+   }
 ````
-   
+
    - Write tests based on the test specification from the plan
    - Tests should FAIL initially (the code doesn't exist yet)
    - Cover the main scenarios, edge cases, error cases
 
 3. **Run tests to verify they fail**:
 ````bash
-   npm test -- models/user.test.ts
+   xcodebuild test -scheme Eko -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16' -only-testing:EkoTests/UserTests
 ````
    - **Important**: Hooks will run automatically after you write the test file
    - You'll see the test failures in the hook output
    - This confirms your tests are actually testing something
 
 4. **GREEN - Write minimal implementation**:
-````typescript
-   // models/user.ts
-   export class User {
-     constructor(data: { email?: string; name?: string }) {
-       if (!data.email) {
-         throw new Error('Email is required');
+````swift
+   // Eko/Models/User.swift
+   import Foundation
+
+   struct User {
+       let name: String
+       let email: String?
+
+       var isValid: Bool {
+           guard let email = email else {
+               return false
+           }
+           return isValidEmail(email)
        }
-       if (!this.isValidEmail(data.email)) {
-         throw new Error('Invalid email');
+
+       var validationError: String? {
+           guard email != nil else {
+               return "Email is required"
+           }
+           guard let email = email, isValidEmail(email) else {
+               return "Invalid email format"
+           }
+           return nil
        }
-       // ... rest of implementation
-     }
-     
-     private isValidEmail(email: string): boolean {
-       return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-     }
+
+       private func isValidEmail(_ email: String) -> Bool {
+           let emailRegex = "[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,64}"
+           let emailPredicate = NSPredicate(format:"SELF MATCHES %@", emailRegex)
+           return emailPredicate.evaluate(with: email)
+       }
    }
 ````
-   
+
    - Write just enough code to make the tests pass
    - Don't over-engineer
    - Focus on passing the tests you wrote
 
 5. **Run tests to verify they pass**:
 ````bash
-   npm test -- models/user.test.ts
+   xcodebuild test -scheme Eko -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16' -only-testing:EkoTests/UserTests
 ````
    - **Important**: Hooks run automatically after you edit the implementation
    - You'll see test results in the hook output
-   - TypeScript compilation also checked automatically
+   - Swift compilation also checked automatically
 
 6. **REFACTOR - Improve code quality**:
    - Extract duplicated code
@@ -146,14 +171,15 @@ For EACH step in your assigned phase, follow the TDD cycle:
 
 7. **Final validation**:
 ````bash
-   # Run full TypeScript check
-   npx tsc --noEmit
-   
+   # Run full Swift build check
+   xcodebuild build -scheme Eko -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16'
+
    # Run all related tests
-   npm test -- models/user.test.ts
+   xcodebuild test -scheme Eko -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16' -only-testing:EkoTests/UserTests
 ````
-   - Hooks already validated, but good to double-check
+   - Hooks already validated after each file edit, but good to do a final comprehensive check
    - Ensure no regressions in related code
+   - Verify all tests still pass together
 
 8. **Update status**:
 ````markdown
@@ -174,23 +200,22 @@ For EACH step in your assigned phase, follow the TDD cycle:
 
 You'll see output like:
 ````
-⚠️ TypeScript errors detected:
-models/user.ts(15,3): error TS2322: Type 'string' is not assignable to type 'number'.
+⚠️ Swift compilation errors detected:
+Models/User.swift:15:3: error: cannot assign value of type 'String' to type 'Int'
 
 ⚠️ Tests failed:
-FAIL models/user.test.ts
-  ✕ should validate email format (5 ms)
-    Expected error to be thrown but none was thrown
+Test Case '-[EkoTests.UserTests testUserValidatesEmailFormat]' failed (0.005 seconds).
+Assertion failed: Expected validation error but none was found
 ````
 
 **When you see hook errors:**
 1. **Don't ignore them** - fix immediately before moving on
-2. **Read the error carefully** - hooks show you exactly what's wrong
+2. **Read the error carefully** - hooks show you exactly what's wrong (Swift compile errors, test failures)
 3. **Fix the issue** - edit the file to resolve the error
 4. **Hook runs again** - you'll see if the fix worked
 5. **Continue only when clean** - all hooks passing before next step
 
-**This is the magic**: Hooks catch technical errors immediately, preventing them from compounding.
+**This is the magic**: Hooks catch technical errors (Swift compilation, test failures) immediately after each file edit, preventing them from compounding.
 
 ### Step 5: Phase Integration Check
 
@@ -203,11 +228,11 @@ After implementing all steps in the phase:
 
 2. **Run comprehensive tests**:
 ````bash
-   # Run all tests for files you changed
-   npm test -- --changedSince=HEAD
-   
-   # Full TypeScript check
-   npx tsc --noEmit
+   # Run all tests for the target
+   xcodebuild test -scheme Eko -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16'
+
+   # Full Swift build check
+   xcodebuild build -scheme Eko -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16'
 ````
 
 3. **Update status file**:
@@ -215,28 +240,28 @@ After implementing all steps in the phase:
    ### Phase 2: Core Logic
    - [x] Step 2.1: Create User model with validation ✓ 2025-01-15 14:23
    - [x] Step 2.2: Implement authentication service ✓ 2025-01-15 14:45
-   - [x] Step 2.3: Create JWT token helpers ✓ 2025-01-15 15:02
-   - [x] Step 2.4: Build login API endpoint ✓ 2025-01-15 15:28
+   - [x] Step 2.3: Create token manager ✓ 2025-01-15 15:02
+   - [x] Step 2.4: Build login service method ✓ 2025-01-15 15:28
    - [x] Step 2.5: Add password hashing utilities ✓ 2025-01-15 15:41
-   
+
    **Phase 2 Status**: Complete
    **Completed**: 2025-01-15 15:41
-   **Files Changed**: models/user.ts, services/auth.ts, utils/jwt.ts, api/auth/login.ts, utils/password.ts
-   **Tests Added**: 5 test files with 23 total tests
+   **Files Changed**: Models/User.swift, Services/AuthService.swift, Utils/TokenManager.swift, Services/LoginService.swift, Utils/PasswordHasher.swift
+   **Tests Added**: 5 test files (EkoTests/Models/UserTests.swift, etc.) with 23 total tests
    **All Tests**: ✅ Passing
-   **TypeScript**: ✅ No errors
+   **Swift Compilation**: ✅ No errors
 ````
 
 4. **Report completion**:
-   "Phase 2: Core Logic implementation complete. All 5 steps implemented using TDD. All tests passing, TypeScript clean. Ready for build-checker review."
+   "Phase 2: Core Logic implementation complete. All 5 steps implemented using TDD. All tests passing, Swift compilation clean. Ready for build-checker review."
 
 ## Critical Rules for TDD
 
 ### Test-First Discipline
 
 **ALWAYS write tests before implementation**:
-- ❌ WRONG: Write user.ts, then write user.test.ts
-- ✅ RIGHT: Write user.test.ts (fails), then write user.ts (passes)
+- ❌ WRONG: Write User.swift, then write UserTests.swift
+- ✅ RIGHT: Write UserTests.swift (fails), then write User.swift (passes)
 
 **Why this matters**:
 - Ensures tests actually test something (not just passing because code is already there)
@@ -252,21 +277,21 @@ After implementing all steps in the phase:
 - ✅ Integration points (how this code interacts with other code)
 
 **Example**:
-````typescript
+````swift
 // Good test coverage for a validation function
-describe('validateEmail', () => {
-  // Happy path
-  it('should accept valid emails', () => { /* ... */ });
-  
-  // Error cases
-  it('should reject emails without @', () => { /* ... */ });
-  it('should reject emails without domain', () => { /* ... */ });
-  
-  // Edge cases
-  it('should handle empty string', () => { /* ... */ });
-  it('should handle null/undefined', () => { /* ... */ });
-  it('should trim whitespace', () => { /* ... */ });
-});
+class EmailValidationTests: XCTestCase {
+    // Happy path
+    func testAcceptsValidEmails() { /* ... */ }
+
+    // Error cases
+    func testRejectsEmailsWithoutAtSign() { /* ... */ }
+    func testRejectsEmailsWithoutDomain() { /* ... */ }
+
+    // Edge cases
+    func testHandlesEmptyString() { /* ... */ }
+    func testHandlesNil() { /* ... */ }
+    func testTrimsWhitespace() { /* ... */ }
+}
 ````
 
 ### When Tests Aren't Needed
@@ -290,34 +315,39 @@ Some steps don't need tests (the plan will say "no test needed"):
 1. **Read golden paths from project-context.md**:
 ````markdown
    ## Conventions
-   
-   ### API Endpoints
-   - Use Zod for validation
-   - Return standard format: { success: boolean, data?: T, error?: string }
-   - Handle errors with try/catch and proper status codes
+
+   ### Service Layer
+   - Use Result type for error handling
+   - Return standard format: Result<T, ServiceError>
+   - Handle errors with proper Swift error types
+   - Use async/await for asynchronous operations
 ````
 
 2. **Apply patterns in your implementation**:
-````typescript
+````swift
    // Following the golden path from above
-   import { z } from 'zod';
-   
-   const userSchema = z.object({
-     email: z.string().email(),
-     name: z.string().min(1)
-   });
-   
-   export async function createUser(req, res) {
-     try {
-       const data = userSchema.parse(req.body);
-       const user = await db.users.create(data);
-       return res.json({ success: true, data: user });
-     } catch (error) {
-       return res.status(400).json({ 
-         success: false, 
-         error: error.message 
-       });
-     }
+   import Foundation
+
+   enum ServiceError: Error {
+       case invalidInput(String)
+       case networkError(Error)
+   }
+
+   struct UserService {
+       func createUser(email: String, name: String) async -> Result<User, ServiceError> {
+           // Validate input
+           guard !email.isEmpty, !name.isEmpty else {
+               return .failure(.invalidInput("Email and name are required"))
+           }
+
+           // Create user
+           do {
+               let user = try await repository.createUser(email: email, name: name)
+               return .success(user)
+           } catch {
+               return .failure(.networkError(error))
+           }
+       }
    }
 ````
 
@@ -334,24 +364,29 @@ Example from context:
 ````markdown
 ## Architecture
 
-### Layered Architecture
-- **UI Layer**: React components (components/, app/)
-- **Service Layer**: Business logic (services/)
-- **Data Layer**: Database access (repositories/)
-- **API Layer**: HTTP endpoints (api/)
+### Layered Architecture (MVVM)
+- **View Layer**: SwiftUI views (Views/)
+- **ViewModel Layer**: View state and logic (ViewModels/)
+- **Service Layer**: Business logic (Services/)
+- **Repository Layer**: Data access (Repositories/)
 
 **Rule**: No layer should import from a layer above it.
 ````
 
 **Your implementation must respect these layers**:
-````typescript
+````swift
 // ✅ CORRECT: Service imports from repository (lower layer)
-// services/user.ts
-import { UserRepository } from '../repositories/user';
+// Services/UserService.swift
+import Foundation
 
-// ❌ WRONG: Service imports from UI (upper layer)
-// services/user.ts
-import { UserCard } from '../components/UserCard'; // NO!
+class UserService {
+    private let repository: UserRepository
+    // ...
+}
+
+// ❌ WRONG: Service imports from view layer (upper layer)
+// Services/UserService.swift
+import SwiftUI  // NO! (unless just using types, not views)
 ````
 
 **The checker will verify architecture compliance**, but you should follow it during implementation.
@@ -386,21 +421,23 @@ import { UserCard } from '../components/UserCard'; // NO!
 **You're not building in isolation** - phases build on each other:
 
 ### Reading Previous Work
-````typescript
+````swift
 // Phase 1 created this:
-// models/user.ts
-export class User {
-  id: string;
-  email: string;
-  name: string;
+// Models/User.swift
+struct User {
+    let id: UUID
+    let email: String
+    let name: String
 }
 
 // Now in Phase 2, you build on it:
-// services/auth.ts
-import { User } from '../models/user';
+// Services/AuthService.swift
+import Foundation
 
-export async function authenticate(email: string, password: string): Promise<User> {
-  // Use the User model from Phase 1
+class AuthService {
+    func authenticate(email: String, password: String) async -> Result<User, AuthError> {
+        // Use the User model from Phase 1
+    }
 }
 ````
 
@@ -408,28 +445,28 @@ export async function authenticate(email: string, password: string): Promise<Use
 
 Sometimes a step requires changing existing files:
 ````markdown
-- Step 3.2: Add avatar field to User model and update tests
+- Step 3.2: Add avatar URL property to User model and update tests
 ````
 
 **Process**:
 1. **Read existing code and tests**
 2. **Update tests first** (TDD!):
-````typescript
-   // models/user.test.ts
-   it('should include avatar field', () => {
-     const user = new User({ email: 'test@example.com', avatar: 'url' });
-     expect(user.avatar).toBe('url');
-   });
+````swift
+   // EkoTests/Models/UserTests.swift
+   func testUserIncludesAvatarURL() {
+       let user = User(id: UUID(), email: "test@example.com", name: "Test", avatarURL: "https://example.com/avatar.jpg")
+       XCTAssertEqual(user.avatarURL, "https://example.com/avatar.jpg")
+   }
 ````
-3. **Run tests** - they fail (avatar doesn't exist yet)
+3. **Run tests** - they fail (avatarURL doesn't exist yet)
 4. **Update implementation**:
-````typescript
-   // models/user.ts
-   export class User {
-     id: string;
-     email: string;
-     name: string;
-     avatar?: string; // Added
+````swift
+   // Models/User.swift
+   struct User {
+       let id: UUID
+       let email: String
+       let name: String
+       let avatarURL: String? // Added
    }
 ````
 5. **Run tests** - they pass
@@ -438,42 +475,42 @@ Sometimes a step requires changing existing files:
 ## Common Mistakes to Avoid
 
 ### ❌ Don't: Skip writing tests
-````typescript
+````swift
 // Just implementing without tests
-export class User {
-  // ...
+struct User {
+    // ...
 }
 ````
 
 ### ✅ Do: Always write tests first
-````typescript
-// user.test.ts - FIRST
-describe('User', () => {
-  it('should work', () => { /* ... */ });
-});
+````swift
+// UserTests.swift - FIRST
+class UserTests: XCTestCase {
+    func testUserWorks() { /* ... */ }
+}
 
-// THEN user.ts
-export class User { /* ... */ }
+// THEN User.swift
+struct User { /* ... */ }
 ````
 
 ---
 
 ### ❌ Don't: Ignore hook output
 ````
-⚠️ TypeScript errors detected
+⚠️ Swift compilation errors detected
 [continues coding anyway]
 ````
 
 ### ✅ Do: Fix hook errors immediately
 ````
-⚠️ TypeScript errors detected
+⚠️ Swift compilation errors detected
 [reads error, fixes issue, sees hooks pass, continues]
 ````
 
 ---
 
 ### ❌ Don't: Implement all steps without TDD
-````typescript
+````swift
 // Writing all 5 steps at once without tests
 // Step 2.1 code
 // Step 2.2 code
@@ -482,7 +519,7 @@ export class User { /* ... */ }
 ````
 
 ### ✅ Do: TDD for each step individually
-````typescript
+````swift
 // Step 2.1 test → Step 2.1 code
 // Step 2.2 test → Step 2.2 code
 // Step 2.3 test → Step 2.3 code
@@ -491,12 +528,12 @@ export class User { /* ... */ }
 ---
 
 ### ❌ Don't: Lose sight of the big picture
-````typescript
+````swift
 // Building Step 2.3 in isolation without considering Phase 1 or Phase 3
 ````
 
 ### ✅ Do: Keep full plan in mind
-````typescript
+````swift
 // Reading full plan: Phase 1 created User model, Phase 3 will need this auth service
 // Building Step 2.3 to integrate well with both
 ````
@@ -504,13 +541,13 @@ export class User { /* ... */ }
 ---
 
 ### ❌ Don't: Deviate from golden paths without reason
-````typescript
+````swift
 // Using a different validation approach because it's easier
 ````
 
 ### ✅ Do: Follow project patterns consistently
-````typescript
-// Using Zod validation as specified in golden paths
+````swift
+// Using Result type and async/await as specified in golden paths
 ````
 
 ## Output Format
@@ -526,7 +563,7 @@ Summary:
 - Test files created: {list test files}
 - Total tests added: {count}
 - All tests passing: ✅
-- TypeScript compilation: ✅
+- Swift compilation: ✅
 - Hooks: ✅ All clean
 
 Phase Status:

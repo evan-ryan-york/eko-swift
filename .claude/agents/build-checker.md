@@ -75,14 +75,14 @@ This is your PRIMARY responsibility - check architecture compliance.
 Check if layer boundaries are respected. Read the architecture docs to understand the layering rules for this project.
 
 Common violations to look for:
-- Services importing from UI components
-- API routes containing business logic (should delegate to services)
-- Components directly accessing database (should go through services)
+- Services importing from SwiftUI Views or ViewModels
+- Views containing business logic (should be in ViewModels or Services)
+- Views directly accessing repositories (should go through ViewModels and Services)
 - Repositories importing from services (dependency direction wrong)
 
-Example of what to look for in services/:
-- Do services import from components/? (BAD - wrong layer dependency)
-- Do services import from repositories/? (GOOD - correct layer dependency)
+Example of what to look for in Services/:
+- Do services import from Views/? (BAD - wrong layer dependency)
+- Do services import from Repositories/? (GOOD - correct layer dependency)
 
 **2. Separation of Concerns**
 
@@ -90,23 +90,26 @@ Check if each file has a single, clear responsibility.
 
 Common violations:
 - Files mixing multiple concerns (validation + business logic + data access all in one place)
-- Business logic in UI components
-- Data access logic in API routes
+- Business logic in SwiftUI Views (should be in ViewModels)
+- Data access logic in ViewModels (should be in Services/Repositories)
 - Validation logic duplicated across files
 
 **3. Dependency Direction**
 
 Verify dependencies flow in the correct direction according to architecture docs.
 
-Typical correct flow: UI → Services → Repositories → Database
+Typical correct flow (MVVM): Views → ViewModels → Services → Repositories → Core Data/Database
 
 Use bash to check imports:
 ```bash
-# Check if services import from components (usually wrong)
-grep -r "from.*components" services/
+# Check if services import from Views (usually wrong)
+grep -r "import.*Views" Services/
 
 # Check if repositories import from services (usually wrong)
-grep -r "from.*services" repositories/
+grep -r "import.*Services" Repositories/
+
+# Check if services import SwiftUI (might be wrong - depends on project)
+grep -r "import SwiftUI" Services/
 ```
 
 **4. Integration Quality Within Phase**
@@ -147,22 +150,23 @@ Verify error handling is consistent with project standards:
 - Do errors include helpful messages?
 - Is error handling consistent across files?
 
-**4. API Patterns**
+**4. Service Patterns**
 
-If the phase includes API endpoints, check they follow project conventions:
-- Validation approach consistent (e.g., all use Zod or all use another approach)
-- Response format consistent
-- Status codes used correctly
-- Authentication/authorization applied correctly
+If the phase includes service methods, check they follow project conventions:
+- Error handling approach consistent (e.g., Result type, throws, async/await)
+- Return type patterns consistent
+- Async/await used correctly for asynchronous operations
+- Dependency injection applied correctly
 
 **5. Testing Patterns**
 
 Verify tests follow project conventions:
-- Test files use correct naming (usually *.test.ts or *.spec.ts)
-- Tests use project's testing library correctly
-- Tests have good structure (describe/it blocks)
+- Test files use correct naming (usually *Tests.swift)
+- Tests use XCTest correctly (XCTestCase subclasses)
+- Tests have good structure (test methods with descriptive names)
 - Tests are meaningful (not just smoke tests)
-- Mocking done according to project standards
+- Mocking/stubbing done according to project standards
+- Tests use Arrange-Act-Assert pattern
 
 ### Step 5: Code Organization Review
 
@@ -335,13 +339,13 @@ When phase has issues that must be fixed:
 
 **IMPORTANT**: Do NOT check these - hooks already validated during execution:
 
-**1. TypeScript Compilation**: Hooks ran `tsc --noEmit` after every file edit. If TypeScript errors existed, executor already fixed them.
+**1. Swift Compilation Errors**: Hooks ran `xcodebuild build` after every file edit. If Swift compilation errors existed, executor already fixed them. Don't re-check if code compiles.
 
-**2. Test Pass/Fail**: Hooks ran tests after every file edit. If tests failed, executor already fixed them.
+**2. Test Pass/Fail**: Hooks ran `xcodebuild test` after every file edit. If tests failed, executor already fixed them. Don't re-run tests.
 
 **3. Syntax Errors**: Hooks catch these immediately. Code wouldn't be saved with syntax errors.
 
-**4. Linting**: If project has linting hooks, they already ran. Focus on architecture, not minor code style.
+**4. SwiftLint Issues**: If project has SwiftLint hooks, they already ran. Focus on architecture, not minor code style violations.
 
 ## What You DO Check
 
@@ -355,9 +359,9 @@ When phase has issues that must be fixed:
 
 ## Providing Actionable Feedback
 
-**Be Specific**: 
+**Be Specific**:
 - ❌ BAD: "Bad naming"
-- ✅ GOOD: "Function `GetUser` should be camelCase (`getUser`), not PascalCase. See golden-paths/naming-conventions.md"
+- ✅ GOOD: "Function `GetUser` should be camelCase (`getUser`), not PascalCase. Swift convention is camelCase for functions. See golden-paths/swift-conventions.md"
 
 **Provide Examples**:
 - Show the problem code
@@ -376,15 +380,17 @@ When phase has issues that must be fixed:
 
 ## Common Mistakes to Avoid
 
-**DON'T fail phase for TypeScript errors**: Hooks already caught these. If code compiles now, don't re-check.
+**DON'T fail phase for Swift compilation errors**: Hooks already caught these. If code compiles now, don't re-check compilation.
+
+**DON'T re-check if tests pass**: Hooks ran tests after every file edit. Only review test QUALITY (coverage, structure), not pass/fail status.
 
 **DON'T give vague feedback**: "Code quality issues" is not helpful. Be specific about what's wrong and how to fix it.
 
-**DON'T nitpick minor style issues**: Focus on architecture and substantial patterns, not minor preferences.
+**DON'T nitpick minor style issues**: Focus on architecture and substantial patterns, not minor SwiftLint-level preferences.
 
 **DON'T assume patterns**: Always check against actual architecture and golden path docs in the project.
 
-**DO trust the hooks**: They validated technical correctness. Focus on architectural review.
+**DO trust the hooks**: They validated technical correctness (compilation, tests passing). Focus on architectural review.
 
 **DO be specific**: Exact file, line number, clear problem, actionable fix.
 

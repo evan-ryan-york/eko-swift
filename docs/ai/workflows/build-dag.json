@@ -47,8 +47,18 @@
           },
           {
             "type": "file",
-            "path": "package.json",
-            "description": "Tech stack information"
+            "path": "*.xcodeproj/project.pbxproj",
+            "description": "Xcode project configuration"
+          },
+          {
+            "type": "file",
+            "path": "Package.swift",
+            "description": "Swift Package Manager configuration"
+          },
+          {
+            "type": "file",
+            "path": "Podfile",
+            "description": "CocoaPods dependencies (if present)"
           },
           {
             "type": "file",
@@ -154,7 +164,7 @@
       "outputs": [
         {
           "type": "files",
-          "pattern": "**/*.{ts,tsx,js,jsx,py,md}",
+          "pattern": "**/*.{swift,md}",
           "description": "Modified source and test files implementing the entire phase"
         },
         {
@@ -167,18 +177,18 @@
       "continuous_validation": {
         "hooks": [
           {
-            "name": "typecheck",
+            "name": "swift-build",
             "trigger": "PostToolUse",
             "matcher": "Write|Edit",
-            "command": "npx tsc --noEmit --pretty false 2>&1 | head -20",
-            "description": "Runs TypeScript compiler after every file edit to catch type errors immediately"
+            "command": "xcodebuild build -scheme Eko -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16' ONLY_ACTIVE_ARCH=YES 2>&1 | xcpretty --color --simple || echo '\n⚠️  Swift compilation errors detected'",
+            "description": "Runs Xcode build after every file edit to catch Swift compilation errors immediately"
           },
           {
-            "name": "test",
+            "name": "swift-test",
             "trigger": "PostToolUse",
             "matcher": "Write|Edit",
-            "command": "npm test -- --findRelatedTests $CLAUDE_FILE_PATHS --passWithNoTests 2>&1 | tail -10",
-            "description": "Runs tests for changed files after every edit to catch logic errors immediately"
+            "command": "xcodebuild test -scheme Eko -sdk iphonesimulator -destination 'platform=iOS Simulator,name=iPhone 16' -only-testing:EkoTests 2>&1 | xcpretty --color --simple --test || echo '\n⚠️  Tests failed'",
+            "description": "Runs Swift tests after every edit to catch logic errors immediately"
           }
         ],
         "description": "Hooks run automatically after EVERY file edit during execution, providing immediate feedback on technical correctness. This prevents compounding errors and allows executor to fix issues before moving to next step."
@@ -200,7 +210,7 @@
       "success_criteria": [
         "All steps in assigned phase implemented",
         "All tests written before implementation (TDD)",
-        "TypeScript compilation clean (validated by hooks)",
+        "Swift compilation clean (validated by hooks)",
         "All tests passing (validated by hooks)",
         "status-update.md updated with timestamps for each step"
       ],
@@ -287,9 +297,9 @@
         ]
       },
       "does_not_check": [
-        "TypeScript compilation errors (hooks already validated)",
-        "Test failures (hooks already validated)",
-        "Syntax errors (hooks already validated)"
+        "Swift compilation errors (hooks run xcodebuild build after every file edit)",
+        "Test pass/fail status (hooks run xcodebuild test after every file edit)",
+        "Syntax errors (hooks catch these immediately)"
       ],
       "success_criteria": [
         "Architecture principles followed",
@@ -355,8 +365,8 @@
     {
       "after_node": "build-executor",
       "type": "continuous",
-      "hooks": ["typecheck", "test"],
-      "description": "PostToolUse hooks run after every file edit to validate TypeScript and tests immediately"
+      "hooks": ["swift-build", "swift-test"],
+      "description": "PostToolUse hooks run after every file edit to validate Swift compilation and tests immediately"
     },
     {
       "after_node": "build-checker",

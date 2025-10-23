@@ -306,7 +306,7 @@ struct ProfileView: View {
                 do {
                     try await supabase.deleteChild(id: child.id)
                     // Remove from local array
-                    await MainActor.run {
+                    _ = await MainActor.run {
                         children.remove(at: index)
                     }
                 } catch {
